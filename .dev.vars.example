@@ -1,0 +1,9 @@
+# Copy to `.dev.vars` for local development only. Never commit real values.
+APP_ENV=development
+
+# Phase 1 needs no third-party credentials.
+# Later phases read provider keys from the platform settings / Secrets store,
+# never from the browser and never from source code:
+#   AI_PROVIDER_API_KEY=
+#   EMAIL_PROVIDER_API_KEY=
+#   WHATSAPP_PROVIDER_TOKEN=
