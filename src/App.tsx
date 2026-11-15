@@ -9,6 +9,7 @@ import {
   LandingPage,
   LoginPage,
   NotFoundPage,
+  OrderPage,
   PrivacyPage,
   SetupPage,
   SupportPage,
@@ -25,11 +26,18 @@ import {
   CompanyTeamPage,
 } from './pages/CompanyPages';
 import {
+  AnalysisDetailPage,
+  CompanyAnalysesPage,
+  NewAnalysisPage,
+} from './pages/AnalysisPages';
+import {
+  AdminAnalysesPage,
   AdminAuditPage,
   AdminCompaniesPage,
   AdminCompanyDetailPage,
   AdminInvoicesPage,
   AdminLayout,
+  AdminOrdersPage,
   AdminOverviewPage,
   AdminPlansPage,
   AdminSettingsPage,
@@ -69,6 +77,7 @@ export default function App() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/support" element={<SupportPage />} />
+          <Route path="/order" element={<OrderPage />} />
 
           <Route
             path="/change-password"
@@ -96,6 +105,9 @@ export default function App() {
             }
           >
             <Route index element={<CompanyDashboardPage />} />
+            <Route path="analyses" element={<CompanyAnalysesPage />} />
+            <Route path="analyses/new" element={<NewAnalysisPage />} />
+            <Route path="analyses/:analysisId" element={<AnalysisDetailPage />} />
             <Route path="company" element={<CompanyProfilePage />} />
             <Route path="team" element={<CompanyTeamPage />} />
             <Route path="subscription" element={<CompanySubscriptionPage />} />
@@ -114,9 +126,11 @@ export default function App() {
             <Route index element={<AdminOverviewPage />} />
             <Route path="companies" element={<AdminCompaniesPage />} />
             <Route path="companies/:companyId" element={<AdminCompanyDetailPage />} />
+            <Route path="orders" element={<AdminOrdersPage />} />
             <Route path="invoices" element={<AdminInvoicesPage />} />
             <Route path="plans" element={<AdminPlansPage />} />
             <Route path="users" element={<AdminUsersPage />} />
+            <Route path="analyses" element={<AdminAnalysesPage />} />
             <Route path="usage" element={<AdminUsagePage />} />
             <Route path="audit" element={<AdminAuditPage />} />
             <Route path="settings" element={<AdminSettingsPage />} />

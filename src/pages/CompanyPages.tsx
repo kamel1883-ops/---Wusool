@@ -65,6 +65,9 @@ export function CompanyLayout() {
     const base = `/app/${companyId}`;
     const items: NavItem[] = [
       { to: base, label: t('nav.dashboard'), icon: 'grid', end: true },
+      ...(permissions.some((permission) => permission.startsWith('analysis.'))
+        ? [{ to: `${base}/analyses`, label: t('nav.analyses'), icon: 'layers' as const }]
+        : []),
       { to: `${base}/company`, label: t('nav.company'), icon: 'building' },
       { to: `${base}/team`, label: t('nav.team'), icon: 'users' },
     ];
@@ -280,15 +283,28 @@ export function CompanyDashboardPage() {
       <Card title={t('dash.nextPhases')} subtitle={t('dash.nextPhasesNote')}>
         <div className="module-grid">
           {modules.map((module) => (
-            <div className="module-card" key={module.key}>
-              <div className="module-card-head">
-                <strong>{t(`module.${module.key}`)}</strong>
-                <span className="tag">{t(module.phase)}</span>
-              </div>
-              {module.key === 'siteAnalysis' && (usage.site_analysis ?? 0) > 0 ? (
-                <span className="muted small">{usage.site_analysis}</span>
-              ) : null}
-            </div>
+            (() => {
+              const inner = (
+                <>
+                  <div className="module-card-head">
+                    <strong>{t(`module.${module.key}`)}</strong>
+                    <span className="tag">{t(module.phase)}</span>
+                  </div>
+                  {module.key === 'siteAnalysis' && (usage.site_analysis ?? 0) > 0 ? (
+                    <span className="muted small">{usage.site_analysis}</span>
+                  ) : null}
+                </>
+              );
+              return module.key === 'siteAnalysis' ? (
+                <Link className="module-card module-card-link" key={module.key} to="analyses">
+                  {inner}
+                </Link>
+              ) : (
+                <div className="module-card" key={module.key}>
+                  {inner}
+                </div>
+              );
+            })()
           ))}
         </div>
       </Card>

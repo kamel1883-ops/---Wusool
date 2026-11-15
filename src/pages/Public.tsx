@@ -1,9 +1,20 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { Navigate, Link, useNavigate } from 'react-router-dom';
+import { Navigate, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError, useApi, type Me } from '../lib/api';
 import { useSession } from '../lib/session';
-import { errorKey } from '../lib/i18n';
-import { Alert, Button, Card, CopyValue, Field, Input, Loading } from '../components/ui';
+import { errorKey, formatSAR } from '../lib/i18n';
+import {
+  Alert,
+  Button,
+  Card,
+  CopyValue,
+  Field,
+  Input,
+  Loading,
+  Select,
+  StatusBadge,
+  Table,
+} from '../components/ui';
 import { FullPageLoading } from '../components/Shell';
 
 type BrandingPayload = {
@@ -84,89 +95,73 @@ function PublicLayout({ children }: { children: ReactNode }) {
 }
 
 export function LandingPage() {
-  const { me, locale, t } = useSession();
+  const { me, t } = useSession();
   if (me) return <Navigate to={landingRouteFor(me)} replace />;
 
-  const features = [
-    ['landing.f1Title', 'landing.f1Text'],
-    ['landing.f2Title', 'landing.f2Text'],
-    ['landing.f3Title', 'landing.f3Text'],
-    ['landing.f4Title', 'landing.f4Text'],
-    ['landing.f5Title', 'landing.f5Text'],
-    ['landing.f6Title', 'landing.f6Text'],
+  const features: Array<[string, string]> = [
+    ['module.siteAnalysis', 'landing2.feat1'],
+    ['module.strategy', 'landing2.feat2'],
+    ['module.content', 'landing2.feat3'],
+    ['module.crm', 'landing2.feat4'],
+    ['landing2.trust3t', 'landing2.feat5'],
   ];
 
-  const flow = ['landing.flow1', 'landing.flow2', 'landing.flow3', 'landing.flow4'];
+  const flow = ['landing2.how1', 'landing2.how2', 'landing2.how3', 'landing2.how4'];
+
+  const faqs: Array<[string, string]> = [
+    ['landing2.faq1q', 'landing2.faq1a'],
+    ['landing2.faq2q', 'landing2.faq2a'],
+    ['landing2.faq3q', 'landing2.faq3a'],
+    ['landing2.faq4q', 'landing2.faq4a'],
+  ];
 
   return (
     <PublicLayout>
-      <section className="hero">
+      <section className="hero hero-b2b">
         <div className="hero-text">
-          <span className="pill">Phase 1 · {t('landing.flowTitle')}</span>
-          <h1>{t('landing.heroTitle')}</h1>
-          <p className="hero-lead">{t('landing.heroLead')}</p>
+          <span className="pill">{t('landing2.badge')}</span>
+          <h1>{t('landing2.heroTitle')}</h1>
+          <p className="hero-lead">{t('landing2.heroLead')}</p>
           <div className="hero-actions">
-            <Link to="/login" className="btn btn-primary">
-              {t('landing.ctaLogin')}
+            <Link to="/order" className="btn btn-primary">
+              {t('landing2.ctaOrder')}
             </Link>
-            <Link to="/support" className="btn btn-secondary">
-              {t('landing.ctaSupport')}
+            <Link to="/login" className="btn btn-secondary">
+              {t('landing2.ctaLogin')}
             </Link>
           </div>
-          <p className="hero-note">{t('landing.phaseNote')}</p>
-        </div>
-        <aside className="hero-panel">
-          <div className="hero-panel-head">
-            <img src="/brand/logo.jpg" alt="" />
-            <div>
-              <strong>{locale === 'ar' ? 'وصول' : 'Wusool'}</strong>
-              <span dir={locale === 'ar' ? 'ltr' : 'rtl'}>
-                {locale === 'ar' ? 'Wusool' : 'وصول'}
-              </span>
-            </div>
-          </div>
-          <ul className="phase-list">
-            <li className="phase-done">
-              <span>01</span>
-              <div>
-                <strong>{locale === 'ar' ? 'الأساس والصلاحيات' : 'Foundation & access'}</strong>
-                <small>{locale === 'ar' ? 'منجزة في هذه النسخة' : 'Delivered in this release'}</small>
-              </div>
+          <ul className="trust-list">
+            <li>
+              <strong>{t('landing2.trust1t')}</strong>
+              <span>{t('landing2.trust1x')}</span>
             </li>
             <li>
-              <span>02</span>
-              <div>
-                <strong>{t('module.siteAnalysis')}</strong>
-                <small>{t('module.phase2')}</small>
-              </div>
+              <strong>{t('landing2.trust2t')}</strong>
+              <span>{t('landing2.trust2x')}</span>
             </li>
             <li>
-              <span>03</span>
-              <div>
-                <strong>{t('module.content')}</strong>
-                <small>{t('module.phase3')}</small>
-              </div>
-            </li>
-            <li>
-              <span>04</span>
-              <div>
-                <strong>{t('module.design')}</strong>
-                <small>{t('module.phase4')}</small>
-              </div>
-            </li>
-            <li>
-              <span>05</span>
-              <div>
-                <strong>{t('module.crm')}</strong>
-                <small>{t('module.phase5')}</small>
-              </div>
+              <strong>{t('landing2.trust3t')}</strong>
+              <span>{t('landing2.trust3x')}</span>
             </li>
           </ul>
+        </div>
+        <aside className="hero-visual">
+          <BrandImg src="/brand/hero-team.jpg" alt={t('landing2.imgAlt')} className="hero-img-main" />
+          <div className="hero-visual-side">
+            <BrandImg src="/brand/hero-office.jpg" alt={t('landing2.imgAlt')} className="hero-img-side" />
+            <BrandImg src="/brand/hero-market.jpg" alt={t('landing2.imgAlt')} className="hero-img-side" />
+          </div>
         </aside>
       </section>
 
+      <section className="section" id="plans">
+        <h2 className="section-title">{t('landing2.plansTitle')}</h2>
+        <p className="section-sub">{t('landing2.plansSub')}</p>
+        <PlansSection />
+      </section>
+
       <section className="section">
-        <h2 className="section-title">{t('landing.featuresTitle')}</h2>
+        <h2 className="section-title">{t('landing2.featuresTitle')}</h2>
         <div className="feature-grid">
           {features.map(([title, text]) => (
             <article className="feature" key={title}>
@@ -178,7 +173,7 @@ export function LandingPage() {
       </section>
 
       <section className="section">
-        <h2 className="section-title">{t('landing.flowTitle')}</h2>
+        <h2 className="section-title">{t('landing2.howTitle')}</h2>
         <ol className="flow">
           {flow.map((key, index) => (
             <li key={key}>
@@ -187,6 +182,267 @@ export function LandingPage() {
             </li>
           ))}
         </ol>
+      </section>
+
+      <section className="section">
+        <h2 className="section-title">{t('landing2.faqTitle')}</h2>
+        <div className="faq-list">
+          {faqs.map(([question, answer]) => (
+            <details className="faq" key={question}>
+              <summary>{t(question)}</summary>
+              <p>{t(answer)}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+    </PublicLayout>
+  );
+}
+
+type PublicPlan = {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  priceSar: number;
+  maxUsers: number | null;
+  featuresAr: string[];
+  featuresEn: string[];
+  prices: Array<{ months: number; price: number }>;
+};
+
+/** Brand imagery with a graceful gradient fallback when the photo is absent. */
+function BrandImg({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [missing, setMissing] = useState(false);
+  if (missing) {
+    return (
+      <div className={className ? `${className} img-fallback` : 'img-fallback'} role="img" aria-label={alt} />
+    );
+  }
+  return <img src={src} alt={alt} className={className} loading="lazy" onError={() => setMissing(true)} />;
+}
+
+const PLAN_PERIODS = [3, 6, 9, 12];
+
+function PlansSection() {
+  const { t, locale } = useSession();
+  const { data, loading } = useApi<{ plans: PublicPlan[] }>('/api/public/plans');
+  const [months, setMonths] = useState(12);
+
+  if (loading) return <Loading />;
+  if (!data || !data.plans.length) return null;
+
+  return (
+    <>
+      <div className="period-switch" role="group" aria-label={t('order.period')}>
+        {PLAN_PERIODS.map((period) => (
+          <button
+            key={period}
+            type="button"
+            className={months === period ? 'period-active' : undefined}
+            onClick={() => setMonths(period)}
+          >
+            {t(`landing2.m${period}`)}
+          </button>
+        ))}
+      </div>
+      <div className="plans-grid">
+        {data.plans.map((plan) => {
+          const price = plan.prices.find((entry) => entry.months === months);
+          const features = locale === 'ar' ? plan.featuresAr : plan.featuresEn;
+          return (
+            <article key={plan.id} className="price-card">
+              <h3>{locale === 'ar' ? plan.nameAr : plan.nameEn}</h3>
+              <p className="price">
+                {price ? formatSAR(price.price, locale) : '—'}
+                <small> / {t(`landing2.m${months}`)}</small>
+              </p>
+              {features.length ? (
+                <ul className="price-features">
+                  {features.slice(0, 6).map((feature) => (
+                    <li key={feature}>{feature}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <Link to={`/order?plan=${plan.id}&months=${months}`} className="btn btn-primary">
+                {t('landing2.orderNow')}
+              </Link>
+            </article>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+export function OrderPage() {
+  const { t, locale } = useSession();
+  const [search] = useSearchParams();
+  const { data } = useApi<{ plans: PublicPlan[] }>('/api/public/plans');
+  const [form, setForm] = useState({
+    companyName: '',
+    contactName: '',
+    email: '',
+    phone: '',
+    password: '',
+  });
+  const [planId, setPlanId] = useState(search.get('plan') ?? '');
+  const [months, setMonths] = useState(Number(search.get('months')) || 12);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const [lookupEmail, setLookupEmail] = useState('');
+  const [lookup, setLookup] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    if (!planId && data?.plans.length) setPlanId(data.plans[0].id);
+  }, [data, planId]);
+
+  const set = (key: keyof typeof form) => (event: { target: { value: string } }) =>
+    setForm({ ...form, [key]: event.target.value });
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/api/public/purchase-requests', {
+        method: 'POST',
+        body: { ...form, planId, months },
+      });
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.code : 'internal_error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const check = async () => {
+    setLookup(null);
+    setError(null);
+    try {
+      const result = await api<{ requests: any[] }>(
+        `/api/public/purchase-requests?email=${encodeURIComponent(lookupEmail)}`
+      );
+      setLookup(result.requests);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.code : 'internal_error');
+    }
+  };
+
+  return (
+    <PublicLayout>
+      <section className="section narrow">
+        <h1 className="section-title">{t('order.title')}</h1>
+        <p className="section-sub">{t('order.sub')}</p>
+        {error ? <Alert tone="danger">{t(errorKey(error))}</Alert> : null}
+        {sent ? (
+          <Card>
+            <Alert tone="ok">{t('order.success')}</Alert>
+            <Button variant="secondary" onClick={() => setSent(false)}>
+              {t('order.newRequest')}
+            </Button>
+          </Card>
+        ) : (
+          <Card>
+            <form onSubmit={submit} className="stack">
+              <Field label={t('order.companyName')}>
+                <Input required value={form.companyName} onChange={set('companyName')} />
+              </Field>
+              <Field label={t('order.contactName')}>
+                <Input value={form.contactName} onChange={set('contactName')} />
+              </Field>
+              <div className="form-row">
+                <Field label={t('order.email')}>
+                  <Input required type="email" dir="ltr" value={form.email} onChange={set('email')} />
+                </Field>
+                <Field label={t('order.phone')}>
+                  <Input dir="ltr" value={form.phone} onChange={set('phone')} />
+                </Field>
+              </div>
+              <div className="form-row">
+                <Field label={t('order.plan')}>
+                  <Select value={planId} onChange={(event) => setPlanId(event.target.value)}>
+                    {(data?.plans ?? []).map((plan) => (
+                      <option key={plan.id} value={plan.id}>
+                        {locale === 'ar' ? plan.nameAr : plan.nameEn}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label={t('order.period')}>
+                  <Select value={String(months)} onChange={(event) => setMonths(Number(event.target.value))}>
+                    {PLAN_PERIODS.map((period) => (
+                      <option key={period} value={period}>
+                        {t(`landing2.m${period}`)}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+              <Field label={t('order.password')} hint={t('order.passwordHint')}>
+                <Input
+                  required
+                  type="password"
+                  dir="ltr"
+                  minLength={10}
+                  value={form.password}
+                  onChange={set('password')}
+                />
+              </Field>
+              <Button type="submit" loading={busy}>
+                {t('order.submit')}
+              </Button>
+            </form>
+          </Card>
+        )}
+      </section>
+
+      <section className="section narrow">
+        <h2 className="section-title">{t('order.checkTitle')}</h2>
+        <p className="section-sub">{t('order.checkHint')}</p>
+        <Card>
+          <div className="lookup-row">
+            <Input
+              type="email"
+              dir="ltr"
+              value={lookupEmail}
+              onChange={(event) => setLookupEmail(event.target.value)}
+            />
+            <Button variant="secondary" onClick={() => void check()}>
+              {t('order.check')}
+            </Button>
+          </div>
+          {lookup ? (
+            lookup.length === 0 ? (
+              <p className="muted">{t('common.noData')}</p>
+            ) : (
+              <Table head={[t('order.companyName'), t('order.period'), t('common.status')] }>
+                {lookup.map((row: any) => (
+                  <tr key={row.id}>
+                    <td>{row.companyName}</td>
+                    <td>
+                      {row.months} {t('admin.monthsUnit')} · {formatSAR(row.amountSar, locale)}
+                    </td>
+                    <td>
+                      <StatusBadge status={row.status} />
+                      <br />
+                      <span className="muted small">{t(`order.status_${row.status}`, row.status)}</span>
+                      {row.reviewNote ? (
+                        <>
+                          <br />
+                          <span className="muted small">
+                            {t('order.reviewNote')}: {row.reviewNote}
+                          </span>
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            )
+          ) : null}
+        </Card>
       </section>
     </PublicLayout>
   );

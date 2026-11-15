@@ -13,7 +13,7 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   formData?: FormData;
 };
@@ -224,6 +224,165 @@ export type AdminProof = {
   status: 'pending_review' | 'approved' | 'rejected';
   reviewNote: string | null;
   reviewedAt: string | null;
+  createdAt: string;
+};
+
+// ---------------------------------------------------------------------------
+// Phase 2 — site analysis
+// ---------------------------------------------------------------------------
+
+export type AnalysisStatus =
+  | 'draft'
+  | 'queued'
+  | 'crawling'
+  | 'extracting'
+  | 'analyzing'
+  | 'awaiting_review'
+  | 'approved'
+  | 'changes_requested'
+  | 'failed'
+  | 'cancelled';
+
+export type FieldSource = 'website' | 'inference' | 'missing';
+
+export type AnalysisItem = {
+  value: string;
+  source: FieldSource;
+  confidence: number;
+  evidence_url?: string | null;
+};
+
+export type AnalysisField = AnalysisItem;
+
+export type StructuredAnalysisResult = {
+  company_profile: { company_name: AnalysisField; industry: AnalysisField; summary: AnalysisField };
+  mission: AnalysisField;
+  vision: AnalysisField;
+  values: AnalysisItem[];
+  products_and_services: AnalysisItem[];
+  target_markets: AnalysisItem[];
+  target_locations: AnalysisItem[];
+  audiences: AnalysisItem[];
+  buyer_personas: AnalysisItem[];
+  customer_problems: AnalysisItem[];
+  value_proposition: AnalysisItem[];
+  calls_to_action: AnalysisItem[];
+  keywords: AnalysisItem[];
+  strengths: AnalysisItem[];
+  opportunities: AnalysisItem[];
+  risks: AnalysisItem[];
+  marketing_channels: AnalysisItem[];
+  recommended_campaigns: AnalysisItem[];
+  content_pillars: AnalysisItem[];
+  roadmap: AnalysisItem[];
+  recommended_kpis: AnalysisItem[];
+  missing_information: AnalysisItem[];
+  assumptions_requiring_review: AnalysisItem[];
+};
+
+export type SiteAnalysis = {
+  id: string;
+  companyId: string;
+  url: string;
+  normalizedUrl: string;
+  status: AnalysisStatus;
+  provider: string | null;
+  model: string | null;
+  crawlerProvider: string | null;
+  locale: 'ar' | 'en' | 'ar-en';
+  maxPages: number;
+  maxDepth: number;
+  consentConfirmed: boolean;
+  latestVersion: number;
+  approvedVersion: number | null;
+  robotsPolicy: string | null;
+  pagesFound: number;
+  pagesAnalyzed: number;
+  pagesFailed: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AnalysisResultPayload = {
+  id: string;
+  analysisId: string;
+  version: number;
+  result: StructuredAnalysisResult | null;
+  confidence: number | null;
+  sourceSummary: { website: number; inference: number; missing: number } | null;
+  createdByAi: boolean;
+  editedByUser: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AnalysisCapabilities = {
+  create: boolean;
+  edit: boolean;
+  review: boolean;
+  approve: boolean;
+};
+
+export type AnalysisProviderStatus = {
+  provider: string;
+  model: string;
+  mock: boolean;
+  configured: boolean;
+  notice: string | null;
+};
+
+export type AnalysisLimits = {
+  defaultMaxPages: number;
+  defaultMaxDepth: number;
+  hardMaxPages: number;
+  hardMaxDepth: number;
+  requireConsent: boolean;
+  showCostToClient: boolean;
+};
+
+export type AnalysisApproval = {
+  id: string;
+  version: number;
+  action: 'submitted' | 'approved' | 'changes_requested' | 'reanalysis_requested';
+  userId: string;
+  userName: string | null;
+  comment: string | null;
+  createdAt: string;
+};
+
+export type AnalysisDetail = {
+  analysis: SiteAnalysis;
+  result: AnalysisResultPayload | null;
+  versions: Array<{
+    id: string;
+    version: number;
+    confidence: number | null;
+    editedByUser: string | null;
+    createdAt: string;
+  }>;
+  approvals: AnalysisApproval[];
+  ai: AnalysisProviderStatus;
+  capabilities: {
+    edit: boolean;
+    review: boolean;
+    approve: boolean;
+    reopen: boolean;
+    showCost: boolean;
+  };
+};
+
+export type AnalysisPageRow = {
+  id: string;
+  url: string;
+  title: string | null;
+  statusCode: number | null;
+  wordCount: number;
+  depth: number;
+  status: 'ok' | 'blocked' | 'not_found' | 'error' | 'skipped';
+  errorMessage: string | null;
   createdAt: string;
 };
 

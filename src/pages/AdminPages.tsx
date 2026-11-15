@@ -53,9 +53,11 @@ export function AdminLayout() {
     () => [
       { to: '/admin', label: t('nav.adminOverview'), icon: 'grid', end: true },
       { to: '/admin/companies', label: t('nav.companies'), icon: 'building' },
+      { to: '/admin/orders', label: t('nav.orders'), icon: 'file' },
       { to: '/admin/invoices', label: t('nav.invoices'), icon: 'card' },
       { to: '/admin/plans', label: t('nav.plans'), icon: 'layers' },
       { to: '/admin/users', label: t('nav.users'), icon: 'users' },
+      { to: '/admin/analyses', label: t('nav.adminAnalyses'), icon: 'layers' },
       { to: '/admin/usage', label: t('nav.usage'), icon: 'chart' },
       { to: '/admin/audit', label: t('nav.audit'), icon: 'file' },
       { to: '/admin/settings', label: t('nav.platformSettings'), icon: 'settings' },
@@ -1438,6 +1440,7 @@ export function AdminPlansPage() {
                     />
                   </Field>
                 </div>
+                <PlanPrices planId={plan.id} />
                 <Field label={t('admin.featuresAr')} htmlFor={`p-far-${plan.id}`}>
                   <Textarea
                     id={`p-far-${plan.id}`}
@@ -1610,6 +1613,29 @@ export function AdminUsersPage() {
     setTempPassword(result.tempPassword);
   };
 
+  const [emailTarget, setEmailTarget] = useState<AdminUser | null>(null);
+  const [emailValue, setEmailValue] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
+
+  const saveEmail = async () => {
+    if (!emailTarget) return;
+    setEmailBusy(true);
+    setError(null);
+    try {
+      await api(`/api/admin/users/${emailTarget.id}/email`, {
+        method: 'PATCH',
+        body: { email: emailValue },
+      });
+      setEmailTarget(null);
+      setEmailValue('');
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.code : 'internal_error');
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -1691,6 +1717,16 @@ export function AdminUsersPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      onClick={() => {
+                        setEmailTarget(user);
+                        setEmailValue(user.email);
+                      }}
+                    >
+                      {t('admin.changeEmail')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       onClick={() =>
                         void patchUser(user, {
                           status: user.status === 'active' ? 'disabled' : 'active',
@@ -1706,6 +1742,31 @@ export function AdminUsersPage() {
           </Table>
         )}
       </Card>
+
+      <Modal
+        open={Boolean(emailTarget)}
+        title={t('admin.changeEmail')}
+        onClose={() => setEmailTarget(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEmailTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={emailBusy} onClick={() => void saveEmail()}>
+              {t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <Field label={t('admin.newEmail')}>
+          <Input
+            type="email"
+            dir="ltr"
+            value={emailValue}
+            onChange={(event) => setEmailValue(event.target.value)}
+          />
+        </Field>
+      </Modal>
 
       <Modal
         open={open}
@@ -2150,3 +2211,506 @@ export function AdminSettingsPage() {
 
 /** Shared role labels for the super admin company view. */
 export const adminRoleLabel = (role: CompanyRole) => role;
+
+// ---------------------------------------------------------------------------
+// Phase 2 — site analysis jobs and limits
+// ---------------------------------------------------------------------------
+
+type AdminAnalysis = {
+  id: string;
+  companyId: string;
+  companyName: string | null;
+  creatorEmail: string | null;
+  url: string;
+  status: string;
+  locale: string;
+  provider: string | null;
+  model: string | null;
+  crawlerProvider: string | null;
+  pagesFound: number;
+  pagesAnalyzed: number;
+  pagesFailed: number;
+  latestVersion: number;
+  approvedVersion: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  usage: { inputTokens: number; outputTokens: number; costMicros: number; calls: number };
+};
+
+type AdminAnalysesData = {
+  analyses: AdminAnalysis[];
+  ai: { provider: string; model: string; mock: boolean; configured: boolean; notice: string | null };
+  limits: {
+    defaultMaxPages: number;
+    defaultMaxDepth: number;
+    hardMaxPages: number;
+    hardMaxDepth: number;
+    maxConcurrent: number;
+    rateLimitPerHour: number;
+    requireConsent: boolean;
+    showCostToClient: boolean;
+  };
+};
+
+export function AdminAnalysesPage() {
+  const { t, locale } = useSession();
+  const { data, loading, reload } = useApi<AdminAnalysesData>('/api/admin/site-analyses');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const [defaultMaxPages, setDefaultMaxPages] = useState(10);
+  const [defaultMaxDepth, setDefaultMaxDepth] = useState(2);
+  const [hardMaxPages, setHardMaxPages] = useState(40);
+  const [hardMaxDepth, setHardMaxDepth] = useState(4);
+  const [maxConcurrent, setMaxConcurrent] = useState(1);
+  const [rateLimit, setRateLimit] = useState(10);
+  const [aiProvider, setAiProvider] = useState('mock');
+  const [crawlerProvider, setCrawlerProvider] = useState('mock');
+  const [showCost, setShowCost] = useState(false);
+
+  useEffect(() => {
+    if (!data) return;
+    setDefaultMaxPages(data.limits.defaultMaxPages);
+    setDefaultMaxDepth(data.limits.defaultMaxDepth);
+    setHardMaxPages(data.limits.hardMaxPages);
+    setHardMaxDepth(data.limits.hardMaxDepth);
+    setMaxConcurrent(data.limits.maxConcurrent);
+    setRateLimit(data.limits.rateLimitPerHour);
+    setAiProvider(data.ai.provider);
+    setShowCost(data.limits.showCostToClient);
+  }, [data]);
+
+  const act = async (id: string, action: 'retry' | 'cancel') => {
+    setBusy(`${id}:${action}`);
+    setError(null);
+    setFlash(null);
+    try {
+      await api(`/api/admin/site-analyses/${id}/${action}`, { method: 'POST' });
+      reload();
+    } catch (err) {
+      setError(errorKey((err as ApiError).code));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveLimits = async () => {
+    setBusy('limits');
+    setError(null);
+    setFlash(null);
+    try {
+      await api('/api/admin/settings', {
+        method: 'PATCH',
+        body: {
+          values: {
+            'analysis.default_max_pages': String(defaultMaxPages),
+            'analysis.default_max_depth': String(defaultMaxDepth),
+            'analysis.max_pages_hard_limit': String(hardMaxPages),
+            'analysis.max_depth_hard_limit': String(hardMaxDepth),
+            'analysis.max_concurrent_jobs': String(maxConcurrent),
+            'analysis.rate_limit_per_hour': String(rateLimit),
+            'analysis.ai_provider': aiProvider,
+            'analysis.crawler_provider': crawlerProvider,
+            'analysis.show_cost_to_client': showCost ? '1' : '0',
+          },
+        },
+      });
+      setFlash(t('admin.limitsSaved'));
+      reload();
+    } catch (err) {
+      setError(errorKey((err as ApiError).code));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (loading || !data) return <Loading />;
+
+  return (
+    <>
+      <PageHeader title={t('admin.analysesTitle')} subtitle={t('admin.analysesSubtitle')} />
+      {!data.ai.configured ? <Alert tone="danger">{t('admin.aiNotConfigured')}</Alert> : null}
+      {data.ai.mock ? <Alert tone="warn">{t('analysis.mockNotice')}</Alert> : null}
+      {error ? <Alert tone="danger">{t(error)}</Alert> : null}
+      {flash ? <Alert tone="ok">{flash}</Alert> : null}
+
+      <Card padded={false}>
+        {data.analyses.length === 0 ? (
+          <div className="card-body">
+            <EmptyState>{t('admin.analysesEmpty')}</EmptyState>
+          </div>
+        ) : (
+          <Table
+            head={[
+              t('admin.company'),
+              t('analysis.columnUrl'),
+              t('analysis.columnStatus'),
+              t('analysis.provider'),
+              t('analysis.columnPages'),
+              t('admin.usageTokens'),
+              t('common.actions'),
+            ]}
+          >
+            {data.analyses.map((row) => (
+              <tr key={row.id}>
+                <td>
+                  {row.companyName ?? '—'}
+                  <br />
+                  <span className="muted small">{row.creatorEmail ?? ''}</span>
+                </td>
+                <td dir="ltr" className="mono-cell">
+                  {row.url}
+                </td>
+                <td>
+                  <StatusBadge status={row.status} />
+                  {row.errorMessage ? (
+                    <>
+                      <br />
+                      <code className="code-inline">{row.errorMessage}</code>
+                    </>
+                  ) : null}
+                </td>
+                <td>
+                  {row.provider ?? '—'}
+                  <br />
+                  <span className="muted small">{row.model ?? ''}</span>
+                </td>
+                <td>
+                  {row.pagesAnalyzed}/{row.pagesFound}
+                  <br />
+                  <span className="muted small">
+                    {row.latestVersion ? `${t('analysis.versionLabel')} ${row.latestVersion}` : '—'}
+                  </span>
+                </td>
+                <td>
+                  {row.usage.inputTokens + row.usage.outputTokens}
+                  <br />
+                  <span className="muted small">{formatSAR(row.usage.costMicros / 1_000_000, locale)}</span>
+                </td>
+                <td className="row-actions">
+                  {['failed', 'cancelled', 'changes_requested'].includes(row.status) ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={busy === `${row.id}:retry`}
+                      onClick={() => void act(row.id, 'retry')}
+                    >
+                      {t('admin.retryJob')}
+                    </Button>
+                  ) : null}
+                  {['draft', 'queued', 'crawling', 'extracting', 'analyzing'].includes(row.status) ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      loading={busy === `${row.id}:cancel`}
+                      onClick={() => void act(row.id, 'cancel')}
+                    >
+                      {t('admin.cancelJob')}
+                    </Button>
+                  ) : null}
+                  <span className="muted small">{formatDateTime(row.createdAt, locale)}</span>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+
+      <Card title={t('admin.limitsTitle')} subtitle={t('admin.limitsSubtitle')}>
+        <div className="form-grid">
+          <Field label={t('admin.maxPagesLimit')}>
+            <Input type="number" min={1} max={40} value={defaultMaxPages} onChange={(e) => setDefaultMaxPages(Number(e.target.value))} />
+          </Field>
+          <Field label={t('admin.maxDepthLimit')}>
+            <Input type="number" min={0} max={4} value={defaultMaxDepth} onChange={(e) => setDefaultMaxDepth(Number(e.target.value))} />
+          </Field>
+          <Field label={`${t('admin.maxPagesLimit')} — ${t('common.max')}`}>
+            <Input type="number" min={1} max={40} value={hardMaxPages} onChange={(e) => setHardMaxPages(Number(e.target.value))} />
+          </Field>
+          <Field label={`${t('admin.maxDepthLimit')} — ${t('common.max')}`}>
+            <Input type="number" min={0} max={4} value={hardMaxDepth} onChange={(e) => setHardMaxDepth(Number(e.target.value))} />
+          </Field>
+          <Field label={t('admin.concurrentJobs')}>
+            <Input type="number" min={1} max={5} value={maxConcurrent} onChange={(e) => setMaxConcurrent(Number(e.target.value))} />
+          </Field>
+          <Field label={t('admin.ratePerHour')}>
+            <Input type="number" min={1} max={100} value={rateLimit} onChange={(e) => setRateLimit(Number(e.target.value))} />
+          </Field>
+          <Field label={t('admin.aiProviderSetting')}>
+            <Select value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
+              <option value="mock">mock</option>
+              <option value="openai">openai</option>
+            </Select>
+          </Field>
+          <Field label={t('admin.crawlerProviderSetting')}>
+            <Select value={crawlerProvider} onChange={(e) => setCrawlerProvider(e.target.value)}>
+              <option value="mock">mock</option>
+              <option value="fetch">fetch</option>
+              <option value="cloudflare">cloudflare</option>
+            </Select>
+          </Field>
+        </div>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={showCost} onChange={(e) => setShowCost(e.target.checked)} />
+          <span>{t('admin.showCost')}</span>
+        </label>
+        <div className="row-actions">
+          <Button loading={busy === 'limits'} onClick={() => void saveLimits()}>
+            {t('common.save')}
+          </Button>
+        </div>
+      </Card>
+    </>
+  );
+}
+
+
+
+const ORDER_PERIODS = [3, 6, 9, 12];
+
+function PlanPrices({ planId }: { planId: string }) {
+  const { t } = useSession();
+  const { data, loading, reload } = useApi<{ prices: Array<{ months: number; price: number }> }>(
+    `/api/admin/plans/${planId}/prices`
+  );
+  const [values, setValues] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!data) return;
+    const next: Record<number, string> = {};
+    for (const row of data.prices) next[row.months] = String(row.price);
+    setValues(next);
+  }, [data]);
+
+  const save = async () => {
+    setBusy(true);
+    setSaved(false);
+    try {
+      await api(`/api/admin/plans/${planId}/prices`, {
+        method: 'PUT',
+        body: {
+          prices: ORDER_PERIODS.map((months) => ({
+            months,
+            price: Number(values[months] ?? 0) || 0,
+          })),
+        },
+      });
+      setSaved(true);
+      reload();
+    } catch {
+      setSaved(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="prices-row">
+      <span className="field-label">{t('admin.pricesTitle')}</span>
+      {loading || !data ? (
+        <Loading />
+      ) : (
+        <div className="prices-grid">
+          {ORDER_PERIODS.map((months) => (
+            <label key={months} className="price-cell">
+              <span>
+                {months} {t('admin.monthsUnit')}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                dir="ltr"
+                value={values[months] ?? ''}
+                onChange={(event) => setValues({ ...values, [months]: event.target.value })}
+              />
+            </label>
+          ))}
+          <Button size="sm" loading={busy} onClick={() => void save()}>
+            {saved ? t('admin.pricesSaved') : t('common.save')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+type AdminOrder = {
+  id: string;
+  companyName: string;
+  contactName: string | null;
+  email: string;
+  phone: string | null;
+  planId: string;
+  planNameAr: string | null;
+  planNameEn: string | null;
+  months: number;
+  amountSar: number | null;
+  status: 'pending_review' | 'approved' | 'rejected';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+};
+
+export function AdminOrdersPage() {
+  const { t, locale } = useSession();
+  const [filter, setFilter] = useState('pending_review');
+  const { data, loading, reload } = useApi<{ requests: AdminOrder[] }>(
+    `/api/admin/purchase-requests${filter ? `?status=${filter}` : ''}`
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<AdminOrder | null>(null);
+  const [rejectNote, setRejectNote] = useState('');
+
+  const approve = async (order: AdminOrder) => {
+    if (!window.confirm(t('admin.activateConfirm'))) return;
+    setBusy(order.id);
+    setError(null);
+    try {
+      await api(`/api/admin/purchase-requests/${order.id}/approve`, { method: 'POST' });
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.code : 'internal_error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const reject = async () => {
+    if (!rejectTarget || !rejectNote.trim()) return;
+    setBusy(rejectTarget.id);
+    setError(null);
+    try {
+      await api(`/api/admin/purchase-requests/${rejectTarget.id}/reject`, {
+        method: 'POST',
+        body: { note: rejectNote },
+      });
+      setRejectTarget(null);
+      setRejectNote('');
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.code : 'internal_error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader title={t('admin.ordersTitle')} subtitle={t('admin.ordersSub')} />
+      {error ? <Alert tone="danger">{t(errorKey(error))}</Alert> : null}
+
+      <Card>
+        <div className="filters">
+          <Select value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <option value="">{t('common.all')}</option>
+            <option value="pending_review">{t('status.pending_review')}</option>
+            <option value="approved">{t('status.approved')}</option>
+            <option value="rejected">{t('status.rejected')}</option>
+          </Select>
+        </div>
+      </Card>
+
+      <Card padded={false}>
+        {loading || !data ? (
+          <div className="card-body">
+            <Loading />
+          </div>
+        ) : data.requests.length === 0 ? (
+          <div className="card-body">
+            <EmptyState>{t('admin.ordersEmpty')}</EmptyState>
+          </div>
+        ) : (
+          <Table
+            head={[
+              t('order.companyName'),
+              t('common.email'),
+              t('order.plan'),
+              t('admin.period'),
+              t('common.status'),
+              t('common.date'),
+              t('common.actions'),
+            ]}
+          >
+            {data.requests.map((order) => (
+              <tr key={order.id}>
+                <td>
+                  {order.companyName}
+                  {order.contactName ? (
+                    <>
+                      <br />
+                      <span className="muted small">{order.contactName}</span>
+                    </>
+                  ) : null}
+                  {order.phone ? (
+                    <>
+                      <br />
+                      <span className="muted small" dir="ltr">{order.phone}</span>
+                    </>
+                  ) : null}
+                </td>
+                <td dir="ltr" className="muted">
+                  {order.email}
+                </td>
+                <td>{locale === 'ar' ? order.planNameAr : order.planNameEn}</td>
+                <td>
+                  {order.months} {t('admin.monthsUnit')}
+                  <br />
+                  <span className="muted small">{formatSAR(order.amountSar, locale)}</span>
+                </td>
+                <td>
+                  <StatusBadge status={order.status} />
+                  {order.reviewNote ? (
+                    <>
+                      <br />
+                      <span className="muted small">{order.reviewNote}</span>
+                    </>
+                  ) : null}
+                </td>
+                <td>{formatDateTime(order.createdAt, locale)}</td>
+                <td>
+                  {order.status === 'pending_review' ? (
+                    <div className="row-actions">
+                      <Button size="sm" loading={busy === order.id} onClick={() => void approve(order)}>
+                        {t('admin.approveActivate')}
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setRejectTarget(order)}>
+                        {t('admin.reject')}
+                      </Button>
+                    </div>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+
+      <Modal
+        open={Boolean(rejectTarget)}
+        title={t('admin.reject')}
+        onClose={() => setRejectTarget(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRejectTarget(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button loading={Boolean(busy)} disabled={!rejectNote.trim()} onClick={() => void reject()}>
+              {t('common.confirm')}
+            </Button>
+          </>
+        }
+      >
+        <Field label={t('admin.rejectReason')}>
+          <Textarea rows={3} value={rejectNote} onChange={(event) => setRejectNote(event.target.value)} />
+        </Field>
+      </Modal>
+    </>
+  );
+}

@@ -9,6 +9,18 @@ export interface Env {
   FILES: R2Bucket;
   ASSETS: Fetcher;
   APP_ENV?: string;
+  // Server-side provider configuration. Secrets live only in the Worker
+  // environment and are never returned by an endpoint.
+  AI_PROVIDER?: string;
+  AI_MODEL?: string;
+  AI_API_KEY?: string;
+  AI_GATEWAY_URL?: string;
+  CRAWLER_PROVIDER?: string;
+  CRAWLER_ACCOUNT_ID?: string;
+  CRAWLER_API_TOKEN?: string;
+  // When set, /setup accepts only this address (case-insensitive) for the
+  // first Super Admin. Never a real address in source — deployment secret.
+  SETUP_ADMIN_EMAIL?: string;
 }
 
 export type Row = Record<string, any>;

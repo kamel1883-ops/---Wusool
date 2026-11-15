@@ -109,6 +109,24 @@
 
 ---
 
+## ١-ب. الجداول المنفَّذة (المرحلة الثانية)
+
+`migrations/0002_site_analysis.sql`:
+
+| الجدول | الغرض | ملاحظات |
+| --- | --- | --- |
+| `site_analyses` | المهمة | `company_id`, `created_by`, `url`, `normalized_url`, الحالة (١٠ حالات), `provider`, `model`, `crawler_provider`, `locale`, `max_pages`, `max_depth`, `consent_confirmed`, `latest_version`, `approved_version`, `robots_policy`, أعداد الصفحات, `error_message`, التوقيتات |
+| `site_pages` | الصفحات المقروءة | `analysis_id`, `company_id`, `url`, `title`, `status_code`, `content_markdown`, `content_hash`, `word_count`, `depth`, `crawl_status` (`ok｜blocked｜not_found｜error｜skipped`), `error_message` — فريد لكل `(analysis_id, url)` |
+| `analysis_results` | النتيجة المنظمة | `version` فريدة لكل تحليل، `result_json` وفق Schema ثابت، `source_summary`, `confidence`, `created_by_ai`, `edited_by_user` |
+| `analysis_approvals` | سجل الاعتماد | `version`, `action` (`submitted｜approved｜changes_requested｜reanalysis_requested`), `user_id`, `comment`, `created_at` |
+| `ai_usage_events` | استهلاك المزوّدين | `provider`, `model`, `operation`, `input_tokens`, `output_tokens`, `estimated_cost_micros`, `status`, `error_message` |
+
+مفاتيح إعدادات جديدة: `analysis.default_max_pages`, `analysis.default_max_depth`,
+`analysis.max_pages_hard_limit`, `analysis.max_depth_hard_limit`,
+`analysis.max_concurrent_jobs`, `analysis.rate_limit_per_hour`,
+`analysis.ai_provider`, `analysis.ai_model`, `analysis.crawler_provider`,
+`analysis.crawler_user_agent`, `analysis.show_cost_to_client`, `analysis.require_consent`.
+
 ## ٢. الجداول المخططة (لا تُنشأ قبل مرحلتها)
 
 ### المرحلة الثانية — تحليل الموقع

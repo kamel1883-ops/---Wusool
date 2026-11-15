@@ -30,6 +30,9 @@ import {
   str,
 } from '../lib/db';
 import { ROLE_PERMISSIONS, type CompanyRole } from '../lib/rbac';
+import { nextInvoiceNumber } from '../lib/invoices';
+import { analysisLimits, startAnalysisJob } from '../lib/analysis-pipeline';
+import { aiProviderStatus } from '../lib/ai';
 import { apiError } from './public';
 
 const app = new Hono<AppEnv>();
@@ -84,18 +87,7 @@ const serializeCompanyRow = (row: any, locale: 'ar' | 'en', warningDays: number)
   };
 };
 
-async function nextInvoiceNumber(env: any) {
-  const year = new Date().getUTCFullYear();
-  const row = await first<{ n: number }>(env, 'SELECT COUNT(*) AS n FROM invoices');
-  let suffix = (row?.n ?? 0) + 1;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const candidate = `WS-${year}-${String(suffix).padStart(4, '0')}`;
-    const exists = await first(env, 'SELECT 1 AS x FROM invoices WHERE number = ?', candidate);
-    if (!exists) return candidate;
-    suffix += 1;
-  }
-  return `WS-${year}-${Date.now().toString(36).toUpperCase()}`;
-}
+
 
 // ---------------------------------------------------------------------------
 // Overview
@@ -1074,7 +1066,7 @@ app.get('/audit', async (c) => {
   });
 });
 
-const SETTINGS_PREFIXES = ['brand.', 'support.', 'billing.', 'owner.', 'subscription.', 'platform.'];
+const SETTINGS_PREFIXES = ['brand.', 'support.', 'billing.', 'owner.', 'subscription.', 'platform.', 'analysis.'];
 const RESERVED_SETTING_KEYS = new Set(['platform.setup_completed']);
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -1134,6 +1126,216 @@ app.patch('/settings', async (c) => {
     action: 'settings.updated',
     entityType: 'platform_settings',
     meta: { keys: Object.keys(patch) },
+  });
+  return c.json({ ok: true });
+});
+
+/**
+ * Site-analysis monitoring (Phase 2). Super Admin sees job state, provider,
+ * limits and technical errors — not the customer's report content, unless that
+ * is ever explicitly granted; every look at an analysis is audited.
+ */
+app.get('/site-analyses', async (c) => {
+  const status = str(c.req.query('status'), 40);
+  const companyId = str(c.req.query('companyId'), 80);
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (status) {
+    where.push('a.status = ?');
+    params.push(status);
+  }
+  if (companyId) {
+    where.push('a.company_id = ?');
+    params.push(companyId);
+  }
+
+  const rows = await all<any>(
+    c.env,
+    `SELECT a.*, co.name AS company_name, u.email AS creator_email
+       FROM site_analyses a
+       LEFT JOIN companies co ON co.id = a.company_id
+       LEFT JOIN users u ON u.id = a.created_by
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY a.created_at DESC LIMIT 200`,
+    ...params
+  );
+  const usage = await all<any>(
+    c.env,
+    `SELECT analysis_id, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+            SUM(estimated_cost_micros) AS cost_micros, COUNT(*) AS calls
+       FROM ai_usage_events GROUP BY analysis_id`
+  );
+  const usageByAnalysis = new Map(usage.map((row) => [row.analysis_id, row]));
+
+  return c.json({
+    analyses: rows.map((row) => {
+      const cost = usageByAnalysis.get(row.id);
+      return {
+        id: row.id,
+        companyId: row.company_id,
+        companyName: row.company_name,
+        creatorEmail: row.creator_email,
+        url: row.normalized_url,
+        status: row.status,
+        locale: row.locale,
+        provider: row.provider,
+        model: row.model,
+        crawlerProvider: row.crawler_provider,
+        pagesFound: row.pages_found,
+        pagesAnalyzed: row.pages_analyzed,
+        pagesFailed: row.pages_failed,
+        latestVersion: row.latest_version,
+        approvedVersion: row.approved_version,
+        errorMessage: row.error_message,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        createdAt: row.created_at,
+        usage: {
+          inputTokens: cost?.input_tokens ?? 0,
+          outputTokens: cost?.output_tokens ?? 0,
+          costMicros: cost?.cost_micros ?? 0,
+          calls: cost?.calls ?? 0,
+        },
+      };
+    }),
+    ai: aiProviderStatus(c.env, await getSettings(c.env)),
+    limits: analysisLimits(c.env, await getSettings(c.env)),
+  });
+});
+
+app.get('/site-analyses/:analysisId', async (c) => {
+  const actor = c.get('user');
+  const analysis = await first<any>(
+    c.env,
+    'SELECT * FROM site_analyses WHERE id = ?',
+    c.req.param('analysisId')
+  );
+  if (!analysis) return apiError(c, 404, 'analysis_not_found');
+
+  const pages = await all<any>(
+    c.env,
+    `SELECT url, status_code, crawl_status, word_count, error_message FROM site_pages
+      WHERE analysis_id = ? ORDER BY depth, created_at LIMIT 100`,
+    analysis.id
+  );
+  const approvals = await all<any>(
+    c.env,
+    `SELECT version, action, user_id, comment, created_at FROM analysis_approvals
+      WHERE analysis_id = ? ORDER BY created_at DESC`,
+    analysis.id
+  );
+  const usage = await all<any>(
+    c.env,
+    `SELECT provider, model, operation, input_tokens, output_tokens, estimated_cost_micros, status,
+            error_message, created_at
+       FROM ai_usage_events WHERE analysis_id = ? ORDER BY created_at DESC`,
+    analysis.id
+  );
+
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    companyId: analysis.company_id,
+    action: 'admin.site_analysis.viewed',
+    entityType: 'site_analysis',
+    entityId: analysis.id,
+  });
+
+  // Deliberately excludes result_json and page content: the admin view is
+  // technical, not a back door into the customer's private report.
+  return c.json({
+    analysis: {
+      id: analysis.id,
+      companyId: analysis.company_id,
+      url: analysis.normalized_url,
+      status: analysis.status,
+      provider: analysis.provider,
+      model: analysis.model,
+      crawlerProvider: analysis.crawler_provider,
+      robotsPolicy: analysis.robots_policy,
+      pagesFound: analysis.pages_found,
+      pagesAnalyzed: analysis.pages_analyzed,
+      pagesFailed: analysis.pages_failed,
+      latestVersion: analysis.latest_version,
+      approvedVersion: analysis.approved_version,
+      errorMessage: analysis.error_message,
+      startedAt: analysis.started_at,
+      completedAt: analysis.completed_at,
+      createdAt: analysis.created_at,
+    },
+    pages: pages.map((page) => ({
+      url: page.url,
+      statusCode: page.status_code,
+      status: page.crawl_status,
+      wordCount: page.word_count,
+      errorMessage: page.error_message,
+    })),
+    approvals,
+    usage,
+  });
+});
+
+app.post('/site-analyses/:analysisId/retry', async (c) => {
+  const actor = c.get('user');
+  const analysis = await first<any>(
+    c.env,
+    'SELECT * FROM site_analyses WHERE id = ?',
+    c.req.param('analysisId')
+  );
+  if (!analysis) return apiError(c, 404, 'analysis_not_found');
+  if (!['failed', 'cancelled', 'changes_requested'].includes(analysis.status)) {
+    return apiError(c, 409, 'analysis_not_retryable');
+  }
+
+  const settings = await getSettings(c.env);
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    companyId: analysis.company_id,
+    action: 'admin.site_analysis.retried',
+    entityType: 'site_analysis',
+    entityId: analysis.id,
+    meta: { previousStatus: analysis.status },
+  });
+
+  const outcome = await startAnalysisJob(
+    c.env,
+    analysis,
+    { id: actor.id, email: actor.email },
+    settings
+  );
+  if (!outcome.ok) return apiError(c, outcome.status, outcome.code);
+  const row = await first<any>(c.env, 'SELECT status, error_message FROM site_analyses WHERE id = ?', analysis.id);
+  return c.json({ ok: true, analysis: { id: analysis.id, status: row?.status, errorMessage: row?.error_message } });
+});
+
+app.post('/site-analyses/:analysisId/cancel', async (c) => {
+  const actor = c.get('user');
+  const analysis = await first<any>(
+    c.env,
+    'SELECT * FROM site_analyses WHERE id = ?',
+    c.req.param('analysisId')
+  );
+  if (!analysis) return apiError(c, 404, 'analysis_not_found');
+  if (!['draft', 'queued', 'crawling', 'extracting', 'analyzing'].includes(analysis.status)) {
+    return apiError(c, 409, 'analysis_not_cancellable');
+  }
+
+  await run(
+    c.env,
+    `UPDATE site_analyses SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ?`,
+    nowIso(),
+    nowIso(),
+    analysis.id
+  );
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    companyId: analysis.company_id,
+    action: 'admin.site_analysis.cancelled',
+    entityType: 'site_analysis',
+    entityId: analysis.id,
+    meta: { previousStatus: analysis.status },
   });
   return c.json({ ok: true });
 });

@@ -1,9 +1,23 @@
 # Copy to `.dev.vars` for local development only. Never commit real values.
 APP_ENV=development
 
-# Phase 1 needs no third-party credentials.
-# Later phases read provider keys from the platform settings / Secrets store,
-# never from the browser and never from source code:
-#   AI_PROVIDER_API_KEY=
+# Phase 2 defaults to the offline mock providers, so no credentials are needed:
+#   analysis.ai_provider      = mock      (settings screen, default)
+#   analysis.crawler_provider = mock      (settings screen, default)
+#
+# To switch to real providers, add these as Worker secrets (never in the
+# browser, never in source) and change the provider in platform settings:
+#   AI_PROVIDER=openai
+#   AI_MODEL=gpt-4o-mini
+#   AI_API_KEY=
+#   AI_GATEWAY_URL=https://api.openai.com/v1
+#   CRAWLER_PROVIDER=cloudflare
+#   CRAWLER_ACCOUNT_ID=
+#   CRAWLER_API_TOKEN=
+#
+# Later phases read other keys from the same server-side store:
 #   EMAIL_PROVIDER_API_KEY=
 #   WHATSAPP_PROVIDER_TOKEN=
+
+# First-admin allowlist for /api/setup (server env only, never commit a value):
+#   SETUP_ADMIN_EMAIL=

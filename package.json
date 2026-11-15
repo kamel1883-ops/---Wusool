@@ -1,16 +1,20 @@
 {
   "name": "wusool",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Wusool — multi-tenant marketing intelligence SaaS (Phase 1: platform foundation)",
+  "description": "Wusool — multi-tenant marketing intelligence SaaS (Phase 2: site analysis + AI report)",
   "scripts": {
     "dev:web": "vite --host 0.0.0.0 --port 3000 --strictPort",
     "dev:api": "wrangler dev --port 8787",
     "build": "vite build",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
-    "db:migrate": "wrangler d1 execute wusool-db --local --file=migrations/0001_init.sql",
-    "db:migrate:remote": "wrangler d1 execute wusool-db --remote --file=migrations/0001_init.sql"
+    "test": "node tests/phase2.test.mjs && node tests/orders.test.mjs",
+    "db:migrate": "npm run db:migrate:phase1 && npm run db:migrate:phase2 && npm run db:migrate:phase3",
+    "db:migrate:phase1": "wrangler d1 execute wusool-db --local --file=migrations/0001_init.sql",
+    "db:migrate:phase2": "wrangler d1 execute wusool-db --local --file=migrations/0002_site_analysis.sql",
+    "db:migrate:phase3": "wrangler d1 execute wusool-db --local --file=migrations/0003_orders.sql",
+    "db:migrate:remote": "wrangler d1 execute wusool-db --remote --file=migrations/0001_init.sql && wrangler d1 execute wusool-db --remote --file=migrations/0002_site_analysis.sql && wrangler d1 execute wusool-db --remote --file=migrations/0003_orders.sql"
   },
   "dependencies": {
     "hono": "^4.6.14",

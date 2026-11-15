@@ -15,6 +15,7 @@ import {
   verifyPassword,
   loadUserBySession,
 } from '../lib/auth';
+import type { Env } from '../lib/db';
 import {
   all,
   audit,
@@ -36,10 +37,10 @@ const app = new Hono<AppEnv>();
 
 export const apiError = (
   c: Context<any>,
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 402,
+  status: number,
   code: string,
   extra: Record<string, unknown> = {}
-) => c.json({ error: { code, ...extra } }, status);
+) => c.json({ error: { code, ...extra } }, status as any);
 
 const LOGIN_WINDOW_MINUTES = 15;
 const LOGIN_MAX_FAILURES = 8;
@@ -77,6 +78,13 @@ app.post('/setup', async (c) => {
   if (!name) return apiError(c, 422, 'name_required');
   if (!isEmail(email)) return apiError(c, 422, 'invalid_email');
   if (password.length < MIN_PASSWORD_LENGTH) return apiError(c, 422, 'weak_password');
+
+  // Deployments pin the first admin address through the SETUP_ADMIN_EMAIL
+  // secret; when it is set, no other address can claim the bootstrap account.
+  const allowedSetupEmail = (c.env.SETUP_ADMIN_EMAIL ?? '').trim().toLowerCase();
+  if (allowedSetupEmail && email !== allowedSetupEmail) {
+    return apiError(c, 403, 'setup_email_not_allowed');
+  }
 
   const salt = randomHex(16);
   const hash = await hashPassword(password, salt);
@@ -326,6 +334,160 @@ app.post('/auth/forgot', async (c) => {
     ok: true,
     deliveryConfigured: Boolean(settings['support.email']),
     supportEmail: settings['support.email'] || '',
+  });
+});
+
+const ORDER_MONTHS = [3, 6, 9, 12];
+
+const publicPlanPrices = async (env: Env) => {
+  const rows = await all<{ plan_id: string; months: number; price_sar: number }>(
+    env,
+    'SELECT plan_id, months, price_sar FROM plan_prices'
+  );
+  const byPlan = new Map<string, Array<{ months: number; price: number }>>();
+  for (const row of rows) {
+    const list = byPlan.get(row.plan_id) ?? [];
+    list.push({ months: row.months, price: row.price_sar });
+    byPlan.set(row.plan_id, list);
+  }
+  return byPlan;
+};
+
+/** Public catalogue used by the landing page and the order form. */
+app.get('/public/plans', async (c) => {
+  const plans = await all<any>(
+    c.env,
+    'SELECT * FROM plans WHERE is_active = 1 ORDER BY sort_order, created_at'
+  );
+  const prices = await publicPlanPrices(c.env);
+  return c.json({
+    plans: plans.map((plan) => {
+      const list =
+        prices.get(plan.id) ??
+        ORDER_MONTHS.map((months) => ({
+          months,
+          price: Math.round(((Number(plan.price_sar) || 0) / 12) * months),
+        }));
+      return {
+        id: plan.id,
+        nameAr: plan.name_ar,
+        nameEn: plan.name_en,
+        priceSar: plan.price_sar,
+        billingPeriod: plan.billing_period,
+        maxUsers: plan.max_users,
+        featuresAr: JSON.parse(plan.features_ar || '[]'),
+        featuresEn: JSON.parse(plan.features_en || '[]'),
+        prices: list.sort((a, b) => a.months - b.months),
+      };
+    }),
+  });
+});
+
+/**
+ * Public purchase request. Creates no account, no company and no session —
+ * only a `pending_review` row. The customer-chosen password is hashed with
+ * PBKDF2 immediately and is never returned by any endpoint.
+ */
+app.post('/public/purchase-requests', async (c) => {
+  const body = await readJson<Record<string, unknown>>(c);
+  const companyName = str(body.companyName, 160);
+  const contactName = str(body.contactName, 120) || null;
+  const email = str(body.email, 190).toLowerCase();
+  const phone = str(body.phone, 40) || null;
+  const planId = str(body.planId, 60);
+  const months = Number(body.months);
+  const password = typeof body.password === 'string' ? body.password : '';
+
+  if (!companyName) return apiError(c, 422, 'name_required');
+  if (!isEmail(email)) return apiError(c, 422, 'invalid_email');
+  if (!planId) return apiError(c, 422, 'invalid_plan');
+  if (!ORDER_MONTHS.includes(months)) return apiError(c, 422, 'invalid_period');
+  if (password.length < MIN_PASSWORD_LENGTH) return apiError(c, 422, 'weak_password');
+
+  const plan = await first<any>(
+    c.env,
+    'SELECT * FROM plans WHERE id = ? AND is_active = 1',
+    planId
+  );
+  if (!plan) return apiError(c, 422, 'invalid_plan');
+  const price = await first<{ price_sar: number }>(
+    c.env,
+    'SELECT price_sar FROM plan_prices WHERE plan_id = ? AND months = ?',
+    planId,
+    months
+  );
+  if (!price) return apiError(c, 422, 'invalid_period');
+
+  const existingUser = await first<any>(c.env, 'SELECT id FROM users WHERE email = ?', email);
+  if (existingUser) return apiError(c, 409, 'email_taken');
+  const pending = await first<any>(
+    c.env,
+    `SELECT id FROM purchase_requests WHERE email = ? AND status = 'pending_review'`,
+    email
+  );
+  if (pending) return apiError(c, 409, 'request_pending');
+
+  const salt = randomHex(16);
+  const hash = await hashPassword(password, salt);
+  const id = newId('ord');
+  const timestamp = nowIso();
+  await run(
+    c.env,
+    `INSERT INTO purchase_requests (id, company_name, contact_name, email, phone, plan_id, months,
+       password_hash, password_salt, password_iterations, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
+    id,
+    companyName,
+    contactName,
+    email,
+    phone,
+    planId,
+    months,
+    hash,
+    salt,
+    PASSWORD_ITERATIONS,
+    timestamp,
+    timestamp
+  );
+  await audit(c.env, {
+    actorEmail: email,
+    action: 'purchase_request.created',
+    entityType: 'purchase_request',
+    entityId: id,
+    meta: { planId, months, amountSar: price.price_sar },
+    ip: c.req.header('cf-connecting-ip') ?? null,
+  });
+  return c.json({ ok: true, requestId: id }, 201);
+});
+
+/** Let a requester follow their own order by email (status + review note only). */
+app.get('/public/purchase-requests', async (c) => {
+  const email = str(c.req.query('email'), 190).toLowerCase();
+  if (!isEmail(email)) return apiError(c, 422, 'invalid_email');
+  const rows = await all<any>(
+    c.env,
+    `SELECT r.id, r.company_name, r.plan_id, r.months, r.status, r.review_note, r.created_at,
+            p.name_ar AS plan_name_ar, p.name_en AS plan_name_en,
+            pp.price_sar AS amount_sar
+       FROM purchase_requests r
+       LEFT JOIN plans p ON p.id = r.plan_id
+       LEFT JOIN plan_prices pp ON pp.plan_id = r.plan_id AND pp.months = r.months
+      WHERE r.email = ? ORDER BY r.created_at DESC LIMIT 20`,
+    email
+  );
+  return c.json({
+    requests: rows.map((row) => ({
+      id: row.id,
+      companyName: row.company_name,
+      planId: row.plan_id,
+      planNameAr: row.plan_name_ar,
+      planNameEn: row.plan_name_en,
+      months: row.months,
+      amountSar: row.amount_sar,
+      status: row.status,
+      reviewNote: row.review_note,
+      createdAt: row.created_at,
+    })),
   });
 });
 

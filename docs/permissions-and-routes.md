@@ -111,3 +111,49 @@
 `settings.updated`
 
 كل إجراء يُخزَّن مع: المستخدم (id + بريد)، الشركة إن وُجدت، الكيان، بيانات وصفية، IP، والوقت.
+
+## ٦. المرحلة الثانية — الصلاحيات والمسارات
+
+### مصفوفة إضافية
+
+| الصلاحية | مالك | مدير تسويق | كاتب | مصمم | قراءة فقط |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| `analysis.view` | ✅ | ✅ | — | — | — |
+| `analysis.view_approved` (المعتمد فقط) | — | — | ✅ | ✅ | ✅ |
+| `analysis.create` | ✅ | ✅ | — | — | — |
+| `analysis.edit` (تعديل/نسخة جديدة) | ✅ | ✅ | — | — | — |
+| `analysis.review` (قراءة المسودات وطلب تعديل) | ✅ | ✅ | — | — | — |
+| `analysis.approve` | ✅ | — | — | — | — |
+
+### مسارات الشركة (مضافة إلى `/api/company`)
+
+`POST /:companyId/site-analyses` · `GET /:companyId/site-analyses` ·
+`GET /:companyId/site-analyses/:analysisId` · `POST …/start` · `POST …/cancel` ·
+`POST …/retry` · `PUT …/results` · `POST …/submit-review` · `POST …/approve` ·
+`POST …/request-changes` · `GET …/pages` (للمراجعين فقط)
+
+كل مسار: جلسة، عضوية الشركة، صلاحية، حالة الاشتراك (للإنشاء والتشغيل)، ربط `companyId`
+من الخادم، وسجل تدقيق.
+
+### مسارات الإدارة
+
+`GET /api/admin/site-analyses` · `GET /api/admin/site-analyses/:id` ·
+`POST …/retry` · `POST …/cancel` — بلا محتوى تقرير العميل، وكل اطلاع مُسجَّل.
+
+### إجراءات التدقيق الجديدة
+
+`site_analysis.created` · `site_analysis.started` · `site_analysis.completed` ·
+`site_analysis.edited` · `site_analysis.submitted` · `site_analysis.approved` ·
+`site_analysis.changes_requested` · `site_analysis.failed` · `site_analysis.retried` ·
+`site_analysis.cancelled` · `site_analysis.mock_provider_used` ·
+`admin.site_analysis.viewed` · `admin.site_analysis.retried` · `admin.site_analysis.cancelled`
+
+### أكواد أخطاء جديدة
+
+`invalid_url`, `url_not_allowed`, `consent_required`, `analysis_not_found`,
+`analysis_in_progress`, `analysis_rate_limited`, `analysis_not_retryable`,
+`analysis_not_cancellable`, `analysis_approved`, `analysis_has_no_result`,
+`result_required`, `comment_required`, `crawl_no_content`, `crawl_failed`,
+`crawler_not_configured`, `crawler_unreachable`, `crawler_failed`,
+`ai_provider_not_configured`, `ai_provider_failed`, `ai_provider_unreachable`,
+`ai_provider_unsupported`, `ai_invalid_response`

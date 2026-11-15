@@ -2,7 +2,9 @@ import { Hono } from 'hono';
 import type { AppEnv } from './lib/auth';
 import publicRoutes from './routes/public';
 import companyRoutes from './routes/company';
+import analysisRoutes from './routes/analysis';
 import adminRoutes from './routes/admin';
+import purchaseAdminRoutes from './routes/purchase-admin';
 
 const app = new Hono<AppEnv>();
 
@@ -38,7 +40,9 @@ app.use('/api/*', async (c, next) => {
 
 app.route('/api', publicRoutes);
 app.route('/api/company', companyRoutes);
+app.route('/api/company', analysisRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin', purchaseAdminRoutes);
 
 app.notFound(async (c) => {
   if (c.req.path.startsWith('/api/')) {
