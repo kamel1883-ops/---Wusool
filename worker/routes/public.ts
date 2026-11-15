@@ -32,6 +32,8 @@ import {
   computeSubscription,
 } from '../lib/db';
 import { ROLE_PERMISSIONS, type CompanyRole } from '../lib/rbac';
+import { sha256Hex } from '../lib/auth';
+import { ensureSchema } from '../lib/init';
 
 const app = new Hono<AppEnv>();
 
@@ -62,7 +64,127 @@ app.get('/public/branding', async (c) => {
   });
 });
 
-/** First-run bootstrap: allowed only while no Super Admin exists. */
+/**
+ * Hosted-database bootstrap. Idempotent and side-effect free beyond creating
+ * missing tables/seeds, so the Setup screen calls it before anything else.
+ */
+app.post('/setup/init', async (c) => {
+  const result = await ensureSchema(c.env);
+  return c.json({ ok: true, ...result });
+});
+
+const SETUP_CODE_MINUTES = 15;
+const SETUP_TOKEN_MINUTES = 20;
+const SETUP_MAX_ATTEMPTS = 5;
+
+const setupEmailGate = (c: Context<any>, email: string) => {
+  // Deployments pin the first admin address through the SETUP_ADMIN_EMAIL
+  // secret; when it is set, no other address can claim the bootstrap account.
+  const allowedSetupEmail = (c.env.SETUP_ADMIN_EMAIL ?? '').trim().toLowerCase();
+  if (allowedSetupEmail && email !== allowedSetupEmail) return false;
+  return true;
+};
+
+const randomDigits = (length: number) => {
+  const buf = new Uint8Array(length);
+  crypto.getRandomValues(buf);
+  return Array.from(buf)
+    .map((b) => String(b % 10))
+    .join('');
+};
+
+/**
+ * Step 1 of first-run bootstrap: the owner proves the address first.
+ * Only the pinned owner address (when SETUP_ADMIN_EMAIL is set) receives a
+ * code; any other address is refused before anything is stored or sent.
+ * No email provider is configured yet, so until one is, the code is returned
+ * once in the response and shown on screen — never logged, never stored
+ * in plain text (only its SHA-256 hash is persisted).
+ */
+app.post('/setup/start', async (c) => {
+  const admins = await first<{ n: number }>(
+    c.env,
+    `SELECT COUNT(*) AS n FROM users WHERE platform_role = 'super_admin'`
+  );
+  if ((admins?.n ?? 0) > 0) return apiError(c, 409, 'setup_completed');
+
+  const body = await readJson<{ email?: string }>(c);
+  const email = str(body.email, 190).toLowerCase();
+  if (!isEmail(email)) return apiError(c, 422, 'invalid_email');
+  if (!setupEmailGate(c, email)) return apiError(c, 403, 'setup_email_not_allowed');
+
+  const code = randomDigits(6);
+  const timestamp = nowIso();
+  const expiresAt = new Date(Date.now() + SETUP_CODE_MINUTES * 60_000).toISOString();
+  await run(c.env, 'DELETE FROM setup_codes WHERE email = ? AND consumed_at IS NULL', email);
+  await run(
+    c.env,
+    `INSERT INTO setup_codes (id, email, code_hash, expires_at, attempts, created_at)
+     VALUES (?, ?, ?, ?, 0, ?)`,
+    newId('stc'),
+    email,
+    await sha256Hex(`setup-code:${email}:${code}`),
+    expiresAt,
+    timestamp
+  );
+  await audit(c.env, {
+    actorEmail: email,
+    action: 'setup.code_issued',
+    entityType: 'user',
+    entityId: email,
+    ip: c.req.header('cf-connecting-ip') ?? null,
+  });
+  return c.json({ ok: true, delivered: false, code, expiresInMinutes: SETUP_CODE_MINUTES });
+});
+
+/** Step 2: the owner types the code; a short-lived token unlocks step 3. */
+app.post('/setup/verify', async (c) => {
+  const admins = await first<{ n: number }>(
+    c.env,
+    `SELECT COUNT(*) AS n FROM users WHERE platform_role = 'super_admin'`
+  );
+  if ((admins?.n ?? 0) > 0) return apiError(c, 409, 'setup_completed');
+
+  const body = await readJson<{ email?: string; code?: string }>(c);
+  const email = str(body.email, 190).toLowerCase();
+  const code = str(body.code, 12).replace(/\D/g, '');
+  if (!isEmail(email) || !code) return apiError(c, 422, 'invalid_code');
+  if (!setupEmailGate(c, email)) return apiError(c, 403, 'setup_email_not_allowed');
+
+  const row = await first<any>(
+    c.env,
+    `SELECT * FROM setup_codes WHERE email = ? AND consumed_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`,
+    email
+  );
+  if (!row) return apiError(c, 410, 'setup_code_expired');
+  if (row.attempts >= SETUP_MAX_ATTEMPTS) {
+    await run(c.env, 'DELETE FROM setup_codes WHERE id = ?', row.id);
+    return apiError(c, 429, 'too_many_attempts');
+  }
+  if (row.expires_at < nowIso()) {
+    await run(c.env, 'DELETE FROM setup_codes WHERE id = ?', row.id);
+    return apiError(c, 410, 'setup_code_expired');
+  }
+  const ok = (await sha256Hex(`setup-code:${email}:${code}`)) === row.code_hash;
+  if (!ok) {
+    await run(c.env, 'UPDATE setup_codes SET attempts = attempts + 1 WHERE id = ?', row.id);
+    return apiError(c, 422, 'invalid_code');
+  }
+  const token = randomHex(32);
+  const tokenExpiresAt = new Date(Date.now() + SETUP_TOKEN_MINUTES * 60_000).toISOString();
+  await run(
+    c.env,
+    `UPDATE setup_codes SET consumed_at = ?, token_hash = ?, token_expires_at = ? WHERE id = ?`,
+    nowIso(),
+    await sha256Hex(`setup-token:${email}:${token}`),
+    tokenExpiresAt,
+    row.id
+  );
+  return c.json({ ok: true, setupToken: token, expiresInMinutes: SETUP_TOKEN_MINUTES });
+});
+
+/** Step 3 (final): verified token + account details creates the Super Admin. */
 app.post('/setup', async (c) => {
   const admins = await first<{ n: number }>(
     c.env,
@@ -70,21 +192,34 @@ app.post('/setup', async (c) => {
   );
   if ((admins?.n ?? 0) > 0) return apiError(c, 409, 'setup_completed');
 
-  const body = await readJson<{ name?: string; email?: string; password?: string; locale?: string }>(c);
+  const body = await readJson<{
+    name?: string;
+    email?: string;
+    password?: string;
+    locale?: string;
+    setupToken?: string;
+  }>(c);
   const name = str(body.name, 120);
   const email = str(body.email, 190).toLowerCase();
   const password = typeof body.password === 'string' ? body.password : '';
+  const setupToken = typeof body.setupToken === 'string' ? body.setupToken : '';
 
   if (!name) return apiError(c, 422, 'name_required');
   if (!isEmail(email)) return apiError(c, 422, 'invalid_email');
   if (password.length < MIN_PASSWORD_LENGTH) return apiError(c, 422, 'weak_password');
+  if (!setupEmailGate(c, email)) return apiError(c, 403, 'setup_email_not_allowed');
+  if (!setupToken) return apiError(c, 422, 'setup_token_required');
 
-  // Deployments pin the first admin address through the SETUP_ADMIN_EMAIL
-  // secret; when it is set, no other address can claim the bootstrap account.
-  const allowedSetupEmail = (c.env.SETUP_ADMIN_EMAIL ?? '').trim().toLowerCase();
-  if (allowedSetupEmail && email !== allowedSetupEmail) {
-    return apiError(c, 403, 'setup_email_not_allowed');
-  }
+  const tokenRow = await first<any>(
+    c.env,
+    `SELECT * FROM setup_codes WHERE email = ? AND consumed_at IS NOT NULL
+      AND token_expires_at > ? ORDER BY consumed_at DESC LIMIT 1`,
+    email,
+    nowIso()
+  );
+  const tokenOk =
+    tokenRow?.token_hash === (await sha256Hex(`setup-token:${email}:${setupToken}`));
+  if (!tokenOk) return apiError(c, 403, 'setup_token_invalid');
 
   const salt = randomHex(16);
   const hash = await hashPassword(password, salt);
@@ -117,6 +252,7 @@ app.post('/setup', async (c) => {
     ip: c.req.header('cf-connecting-ip') ?? null,
   });
 
+  await run(c.env, 'DELETE FROM setup_codes WHERE email = ?', email);
   await createSession(c, id);
   return c.json({ ok: true });
 });
@@ -375,6 +511,7 @@ app.get('/public/plans', async (c) => {
         priceSar: plan.price_sar,
         billingPeriod: plan.billing_period,
         maxUsers: plan.max_users,
+        monthlyAnalyses: plan.monthly_analyses ?? null,
         featuresAr: JSON.parse(plan.features_ar || '[]'),
         featuresEn: JSON.parse(plan.features_en || '[]'),
         prices: list.sort((a, b) => a.months - b.months),

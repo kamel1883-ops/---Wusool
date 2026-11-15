@@ -106,7 +106,7 @@ app.get('/:companyId', async (c) => {
     subscription,
     role,
     permissions: ROLE_PERMISSIONS[role as keyof typeof ROLE_PERMISSIONS] ?? [],
-    plan: plan ? { id: plan.id, nameAr: plan.name_ar, nameEn: plan.name_en, priceSar: plan.price_sar, billingPeriod: plan.billing_period } : null,
+    plan: plan ? { id: plan.id, nameAr: plan.name_ar, nameEn: plan.name_en, priceSar: plan.price_sar, billingPeriod: plan.billing_period, maxUsers: plan.max_users ?? null, monthlyAnalyses: plan.monthly_analyses ?? null } : null,
     counts: {
       members: membersCount?.n ?? 0,
       invoices: invoiceRows?.n ?? 0,
@@ -227,6 +227,21 @@ app.post('/:companyId/members', async (c) => {
   if (!name) return apiError(c, 422, 'name_required');
   if (!isEmail(email)) return apiError(c, 422, 'invalid_email');
   if (!isCompanyRole(memberRole)) return apiError(c, 422, 'invalid_role');
+
+  // Package seats are a real limit: the plan caps active members.
+  const seatPlan = company.plan_id
+    ? await first<any>(c.env, 'SELECT max_users FROM plans WHERE id = ?', company.plan_id)
+    : null;
+  if (seatPlan && seatPlan.max_users !== null && seatPlan.max_users !== undefined) {
+    const seats = await first<{ n: number }>(
+      c.env,
+      `SELECT COUNT(*) AS n FROM memberships WHERE company_id = ? AND status = 'active'`,
+      company.id
+    );
+    if ((seats?.n ?? 0) >= Number(seatPlan.max_users)) {
+      return apiError(c, 403, 'plan_seats_exceeded');
+    }
+  }
 
   const existing = await first<any>(c.env, 'SELECT * FROM users WHERE email = ?', email);
   if (existing) {
@@ -460,12 +475,44 @@ app.get('/:companyId/invoices', async (c) => {
   const plan = company.plan_id
     ? await first<any>(c.env, 'SELECT * FROM plans WHERE id = ?', company.plan_id)
     : null;
+  const seatsUsed =
+    (
+      await first<{ n: number }>(
+        c.env,
+        `SELECT COUNT(*) AS n FROM memberships WHERE company_id = ? AND status = 'active'`,
+        company.id
+      )
+    )?.n ?? 0;
+  const monthStart = `${nowIso().slice(0, 7)}-01T00:00:00.000Z`;
+  const analysesUsed =
+    (
+      await first<{ n: number }>(
+        c.env,
+        `SELECT COUNT(*) AS n FROM site_analyses WHERE company_id = ? AND created_at >= ?`,
+        company.id,
+        monthStart
+      )
+    )?.n ?? 0;
 
   return c.json({
     subscription: computeSubscription(company, warningDays),
     plan: plan
-      ? { id: plan.id, nameAr: plan.name_ar, nameEn: plan.name_en, priceSar: plan.price_sar, billingPeriod: plan.billing_period }
+      ? {
+          id: plan.id,
+          nameAr: plan.name_ar,
+          nameEn: plan.name_en,
+          priceSar: plan.price_sar,
+          billingPeriod: plan.billing_period,
+          maxUsers: plan.max_users ?? null,
+          monthlyAnalyses: plan.monthly_analyses ?? null,
+        }
       : null,
+    limits: {
+      seatsUsed,
+      seatsMax: plan?.max_users ?? null,
+      analysesUsed,
+      analysesMax: plan?.monthly_analyses ?? null,
+    },
     invoices: invoices.map((invoice) => ({
       id: invoice.id,
       number: invoice.number,

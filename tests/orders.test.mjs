@@ -147,6 +147,7 @@ async function main() {
   migrate('migrations/0001_init.sql');
   migrate('migrations/0002_site_analysis.sql');
   migrate('migrations/0003_orders.sql');
+  migrate('migrations/0004_setup_codes.sql');
 
   console.log('· starting wrangler dev');
   pinSeedEmail();
@@ -169,19 +170,44 @@ async function main() {
   // -------------------------------------------------------------------------
   // Setup is pinned to the seeded admin address
   // -------------------------------------------------------------------------
-  const wrongSetup = await anon.req('/api/setup', {
+  const wrongStart = await anon.req('/api/setup/start', {
     method: 'POST',
-    body: { name: 'Intruder', email: 'intruder@example.com', password: 'IntruderPass12345' },
+    body: { email: 'intruder@example.com' },
   });
   check(
     'setup rejects an address outside the seed',
-    wrongSetup.status === 403 && wrongSetup.data?.error?.code === 'setup_email_not_allowed',
-    wrongSetup.data
+    wrongStart.status === 403 && wrongStart.data?.error?.code === 'setup_email_not_allowed',
+    wrongStart.data
   );
 
+  const start = await admin.req('/api/setup/start', {
+    method: 'POST',
+    body: { email: SEED_ADMIN },
+  });
+  check('setup issues a code for the seeded address', start.status === 200 && start.data.code, start.data);
+
+  const wrongCode = await admin.req('/api/setup/verify', {
+    method: 'POST',
+    body: { email: SEED_ADMIN, code: '000000' },
+  });
+  check(
+    'a wrong code is refused',
+    wrongCode.status === 422 && wrongCode.data?.error?.code === 'invalid_code',
+    wrongCode.data
+  );
+
+  const verify = await admin.req('/api/setup/verify', {
+    method: 'POST',
+    body: { email: SEED_ADMIN, code: start.data.code },
+  });
   const setup = await admin.req('/api/setup', {
     method: 'POST',
-    body: { name: 'Platform Admin', email: SEED_ADMIN, password: 'AdminPass12345' },
+    body: {
+      name: 'Platform Admin',
+      email: SEED_ADMIN,
+      password: 'AdminPass12345',
+      setupToken: verify.data.setupToken,
+    },
   });
   check('setup accepts the seeded admin address', setup.status === 200, setup.data);
 
@@ -303,6 +329,45 @@ async function main() {
 
   const again = await admin.req(`/api/admin/purchase-requests/${requestId}/approve`, { method: 'POST' });
   check('double approval is refused', again.status === 409, again.data);
+
+  // -------------------------------------------------------------------------
+  // Plan limits are real: starter seats cap + monthly analysis quota
+  // -------------------------------------------------------------------------
+  const companyId = approved.data.companyId;
+  const addMember = (email) =>
+    owner.req(`/api/company/${companyId}/members`, {
+      method: 'POST',
+      body: { name: email.split('@')[0], email, role: 'viewer' },
+    });
+  const member1 = await addMember('seat-one@example.com');
+  const member2 = await addMember('seat-two@example.com');
+  check('seats within the plan cap are allowed', member1.status === 200 && member2.status === 200);
+  const member3 = await addMember('seat-three@example.com');
+  check(
+    'the plan seat cap is enforced',
+    member3.status === 403 && member3.data?.error?.code === 'plan_seats_exceeded',
+    member3.data
+  );
+
+  const capQuota = await admin.req('/api/admin/plans/plan_starter', {
+    method: 'PATCH',
+    body: { monthlyAnalyses: 0 },
+  });
+  check('admin can lower the monthly quota', capQuota.status === 200, capQuota.data);
+  const overQuota = await owner.req(`/api/company/${companyId}/site-analyses`, {
+    method: 'POST',
+    body: { url: 'https://example.com', consent: true },
+  });
+  check(
+    'the monthly analysis quota is enforced',
+    overQuota.status === 429 && overQuota.data?.error?.code === 'plan_quota_exceeded',
+    overQuota.data
+  );
+  const restoreQuota = await admin.req('/api/admin/plans/plan_starter', {
+    method: 'PATCH',
+    body: { monthlyAnalyses: 10 },
+  });
+  check('quota is restored', restoreQuota.status === 200);
 
   // -------------------------------------------------------------------------
   // Rejection with a visible reason

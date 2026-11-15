@@ -697,7 +697,8 @@ export function CompanySubscriptionPage() {
   const { company } = overview;
   const { data, loading, reload: reloadInvoices } = useApi<{
     subscription: Subscription;
-    plan: { id: string; nameAr: string; nameEn: string; priceSar: number; billingPeriod: string } | null;
+    plan: { id: string; nameAr: string; nameEn: string; priceSar: number; billingPeriod: string; maxUsers: number | null; monthlyAnalyses: number | null } | null;
+    limits: { seatsUsed: number; seatsMax: number | null; analysesUsed: number; analysesMax: number | null };
     invoices: Invoice[];
     bank: {
       bankName: string;
@@ -786,6 +787,25 @@ export function CompanySubscriptionPage() {
                 {data.plan && data.plan.priceSar > 0
                   ? `${formatSAR(data.plan.priceSar, locale)} / ${t('common.perYear')}`
                   : t('sub.priceNotSet')}
+              </dd>
+            </div>
+          </dl>
+        </Card>
+
+        <Card title={t('sub.limitsTitle')}>
+          <dl className="detail-list">
+            <div>
+              <dt>{t('sub.seatsUsed')}</dt>
+              <dd dir="ltr">
+                {data.limits.seatsUsed} /{' '}
+                {data.limits.seatsMax === null ? t('plan.unlimited') : data.limits.seatsMax}
+              </dd>
+            </div>
+            <div>
+              <dt>{t('plan.monthlyAnalyses')}</dt>
+              <dd dir="ltr">
+                {data.limits.analysesUsed} /{' '}
+                {data.limits.analysesMax === null ? t('plan.unlimited') : data.limits.analysesMax}
               </dd>
             </div>
           </dl>

@@ -88,6 +88,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
           <Link to="/terms">{t('landing.terms')}</Link>
           <Link to="/privacy">{t('landing.privacy')}</Link>
           <Link to="/support">{t('landing.support')}</Link>
+          <Link to="/setup">{t('auth.ownerPortal')}</Link>
         </span>
       </footer>
     </div>
@@ -543,9 +544,21 @@ export function SetupPage() {
   const { refresh, loading, t } = useSession();
   const navigate = useNavigate();
   const branding = useApi<BrandingPayload>('/api/public/branding');
-  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [shownCode, setShownCode] = useState<string | null>(null);
+  const [setupToken, setSetupToken] = useState('');
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fresh hosted databases start empty — bootstrap the schema on arrival so
+  // the very first visit can complete the setup without manual SQL.
+  useEffect(() => {
+    void api('/api/setup/init', { method: 'POST' }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (branding.data?.platform.setupCompleted) navigate('/login', { replace: true });
@@ -553,16 +566,54 @@ export function SetupPage() {
 
   if (loading || branding.loading) return <FullPageLoading />;
 
-  const submit = async (event: FormEvent) => {
+  const fail = (err: unknown) => setError(err instanceof ApiError ? err.code : 'internal_error');
+
+  const start = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api('/api/setup', { method: 'POST', body: form });
+      const result = await api<{ code?: string }>('/api/setup/start', {
+        method: 'POST',
+        body: { email },
+      });
+      setShownCode(result.code ?? null);
+      setStep(2);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<{ setupToken: string }>('/api/setup/verify', {
+        method: 'POST',
+        body: { email, code },
+      });
+      setSetupToken(result.setupToken);
+      setStep(3);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finish = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/api/setup', { method: 'POST', body: { name, email, password, setupToken } });
       const result = await refresh();
       if (result) navigate(landingRouteFor(result), { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.code : 'internal_error');
+      fail(err);
     } finally {
       setBusy(false);
     }
@@ -574,43 +625,77 @@ export function SetupPage() {
       <p className="muted">{t('auth.setupSubtitle')}</p>
       <Alert tone="warn">{t('auth.setupNote')}</Alert>
       {error ? <Alert tone="danger">{t(errorKey(error))}</Alert> : null}
-      <form onSubmit={submit} className="stack">
-        <Field label={t('auth.fullName')} htmlFor="setup-name">
-          <Input
-            id="setup-name"
-            required
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-          />
-        </Field>
-        <Field label={t('common.email')} htmlFor="setup-email">
-          <Input
-            id="setup-email"
-            type="email"
-            dir="ltr"
-            required
-            value={form.email}
-            onChange={(event) => setForm({ ...form, email: event.target.value })}
-          />
-        </Field>
-        <Field label={t('common.password')} hint={t('auth.passwordMin')} htmlFor="setup-password">
-          <Input
-            id="setup-password"
-            type="password"
-            dir="ltr"
-            minLength={10}
-            required
-            value={form.password}
-            onChange={(event) => setForm({ ...form, password: event.target.value })}
-          />
-        </Field>
-        <Button type="submit" loading={busy}>
-          {t('auth.createAdmin')}
-        </Button>
-        <Link to="/login" className="auth-links">
-          {t('auth.backToLogin')}
-        </Link>
-      </form>
+      {step === 1 ? (
+        <form onSubmit={start} className="stack">
+          <h3>{t('auth.setupStep1')}</h3>
+          <p className="muted">{t('auth.setupStep1Hint')}</p>
+          <Field label={t('common.email')} htmlFor="setup-email">
+            <Input
+              id="setup-email"
+              type="email"
+              dir="ltr"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </Field>
+          <Button type="submit" loading={busy}>
+            {t('auth.sendCode')}
+          </Button>
+        </form>
+      ) : null}
+      {step === 2 ? (
+        <form onSubmit={verify} className="stack">
+          <h3>{t('auth.setupStep2')}</h3>
+          <p className="muted">{t('auth.setupStep2Hint')}</p>
+          {shownCode ? (
+            <Alert tone="info">
+              <div>{t('auth.codeShownDev')}</div>
+              <CopyValue value={shownCode} />
+            </Alert>
+          ) : null}
+          <Field label={t('auth.codeLabel')} htmlFor="setup-code">
+            <Input
+              id="setup-code"
+              dir="ltr"
+              inputMode="numeric"
+              maxLength={6}
+              required
+              value={code}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+            />
+          </Field>
+          <Button type="submit" loading={busy}>
+            {t('auth.verifyCode')}
+          </Button>
+        </form>
+      ) : null}
+      {step === 3 ? (
+        <form onSubmit={finish} className="stack">
+          <h3>{t('auth.setupStep3')}</h3>
+          <p className="muted">{t('auth.setupOwnerNote')}</p>
+          <Field label={t('auth.fullName')} htmlFor="setup-name">
+            <Input id="setup-name" required value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <Field label={t('common.password')} hint={t('auth.passwordMin')} htmlFor="setup-password">
+            <Input
+              id="setup-password"
+              type="password"
+              dir="ltr"
+              minLength={10}
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </Field>
+          <Button type="submit" loading={busy}>
+            {t('auth.createAdmin')}
+          </Button>
+        </form>
+      ) : null}
+      <Link to="/login" className="auth-links">
+        {t('auth.backToLogin')}
+      </Link>
     </AuthPanel>
   );
 }

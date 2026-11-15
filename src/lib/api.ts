@@ -179,6 +179,7 @@ export type Plan = {
   priceSar: number;
   billingPeriod: string;
   maxUsers: number | null;
+  monthlyAnalyses: number | null;
   featuresAr: string[];
   featuresEn: string[];
   isActive: boolean;

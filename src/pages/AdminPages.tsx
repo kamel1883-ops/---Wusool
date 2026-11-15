@@ -1306,6 +1306,7 @@ export function AdminPlansPage() {
     nameEn: '',
     priceSar: '',
     maxUsers: '',
+    monthlyAnalyses: '',
     featuresAr: '',
     featuresEn: '',
   });
@@ -1316,6 +1317,7 @@ export function AdminPlansPage() {
       nameEn: plan.nameEn,
       priceSar: String(plan.priceSar),
       maxUsers: plan.maxUsers ? String(plan.maxUsers) : '',
+      monthlyAnalyses: plan.monthlyAnalyses ?? '' ? String(plan.monthlyAnalyses ?? '') : '',
       featuresAr: plan.featuresAr.join('\n'),
       featuresEn: plan.featuresEn.join('\n'),
       isActive: plan.isActive,
@@ -1337,6 +1339,7 @@ export function AdminPlansPage() {
           nameEn: draft.nameEn,
           priceSar: Number(draft.priceSar) || 0,
           maxUsers: draft.maxUsers ? Number(draft.maxUsers) : null,
+          monthlyAnalyses: draft.monthlyAnalyses === '' ? null : Number(draft.monthlyAnalyses) || 0,
           featuresAr: String(draft.featuresAr)
             .split('\n')
             .map((line) => line.trim())
@@ -1369,12 +1372,13 @@ export function AdminPlansPage() {
           nameEn: newPlan.nameEn || newPlan.nameAr,
           priceSar: Number(newPlan.priceSar) || 0,
           maxUsers: newPlan.maxUsers ? Number(newPlan.maxUsers) : null,
+          monthlyAnalyses: newPlan.monthlyAnalyses === '' ? null : Number(newPlan.monthlyAnalyses) || 0,
           featuresAr: newPlan.featuresAr.split('\n').map((line) => line.trim()).filter(Boolean),
           featuresEn: newPlan.featuresEn.split('\n').map((line) => line.trim()).filter(Boolean),
         },
       });
       setOpen(false);
-      setNewPlan({ nameAr: '', nameEn: '', priceSar: '', maxUsers: '', featuresAr: '', featuresEn: '' });
+      setNewPlan({ nameAr: '', nameEn: '', priceSar: '', maxUsers: '', monthlyAnalyses: '', featuresAr: '', featuresEn: '' });
       reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.code : 'internal_error');
@@ -1437,6 +1441,16 @@ export function AdminPlansPage() {
                       dir="ltr"
                       value={draft.maxUsers}
                       onChange={(event) => updateDraft(plan, { maxUsers: event.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('plan.monthlyAnalyses')} htmlFor={`p-quota-${plan.id}`}>
+                    <Input
+                      id={`p-quota-${plan.id}`}
+                      type="number"
+                      min={0}
+                      dir="ltr"
+                      value={draft.monthlyAnalyses}
+                      onChange={(event) => updateDraft(plan, { monthlyAnalyses: event.target.value })}
                     />
                   </Field>
                 </div>
@@ -1526,6 +1540,16 @@ export function AdminPlansPage() {
                 dir="ltr"
                 value={newPlan.maxUsers}
                 onChange={(event) => setNewPlan({ ...newPlan, maxUsers: event.target.value })}
+              />
+            </Field>
+            <Field label={t('plan.monthlyAnalyses')} htmlFor="np-quota">
+              <Input
+                id="np-quota"
+                type="number"
+                min={0}
+                dir="ltr"
+                value={newPlan.monthlyAnalyses}
+                onChange={(event) => setNewPlan({ ...newPlan, monthlyAnalyses: event.target.value })}
               />
             </Field>
           </div>

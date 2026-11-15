@@ -132,6 +132,7 @@ async function main() {
   console.log('· applying migrations');
   migrate('migrations/0001_init.sql');
   migrate('migrations/0002_site_analysis.sql');
+  migrate('migrations/0004_setup_codes.sql');
 
   console.log('· starting wrangler dev');
   server = spawn(
@@ -157,9 +158,23 @@ async function main() {
   // -------------------------------------------------------------------------
   const admin = new Client('admin');
   const adminEmail = process.env.SETUP_ADMIN_EMAIL ?? 'admin@example.com';
+  const start = await admin.req('/api/setup/start', {
+    method: 'POST',
+    body: { email: adminEmail },
+  });
+  check('setup issues a verification code', start.status === 200 && start.data.code, start.data);
+  const verify = await admin.req('/api/setup/verify', {
+    method: 'POST',
+    body: { email: adminEmail, code: start.data.code },
+  });
   const setup = await admin.req('/api/setup', {
     method: 'POST',
-    body: { name: 'Platform Admin', email: adminEmail, password: 'AdminPass12345' },
+    body: {
+      name: 'Platform Admin',
+      email: adminEmail,
+      password: 'AdminPass12345',
+      setupToken: verify.data.setupToken,
+    },
   });
   check('setup creates the first super admin', setup.status === 200, setup.data);
 

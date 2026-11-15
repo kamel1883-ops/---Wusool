@@ -115,6 +115,32 @@ export async function checkAnalysisQuota(
   if ((recent?.n ?? 0) >= limits.rateLimitPerHour) {
     return { ok: false, code: 'analysis_rate_limited', status: 429 };
   }
+
+  // Package quota is a real limit: the plan caps new analyses per month.
+  const company = await first<{ plan_id: string | null }>(
+    env,
+    'SELECT plan_id FROM companies WHERE id = ?',
+    companyId
+  );
+  if (company?.plan_id) {
+    const plan = await first<{ monthly_analyses: number | null }>(
+      env,
+      'SELECT monthly_analyses FROM plans WHERE id = ?',
+      company.plan_id
+    );
+    if (plan && plan.monthly_analyses !== null && plan.monthly_analyses !== undefined) {
+      const monthStart = `${nowIso().slice(0, 7)}-01T00:00:00.000Z`;
+      const used = await first<{ n: number }>(
+        env,
+        `SELECT COUNT(*) AS n FROM site_analyses WHERE company_id = ? AND created_at >= ?`,
+        companyId,
+        monthStart
+      );
+      if ((used?.n ?? 0) >= Number(plan.monthly_analyses)) {
+        return { ok: false, code: 'plan_quota_exceeded', status: 429 };
+      }
+    }
+  }
   return { ok: true };
 }
 

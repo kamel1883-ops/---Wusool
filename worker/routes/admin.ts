@@ -190,6 +190,7 @@ app.get('/plans', async (c) => {
       priceSar: row.price_sar,
       billingPeriod: row.billing_period,
       maxUsers: row.max_users,
+      monthlyAnalyses: row.monthly_analyses ?? null,
       featuresAr: JSON.parse(row.features_ar || '[]'),
       featuresEn: JSON.parse(row.features_en || '[]'),
       isActive: Boolean(row.is_active),
@@ -208,13 +209,16 @@ app.post('/plans', async (c) => {
   await run(
     c.env,
     `INSERT INTO plans (id, name_ar, name_en, price_sar, billing_period, max_users,
-       features_ar, features_en, is_active, sort_order, created_at)
-     VALUES (?, ?, ?, ?, 'annual', ?, ?, ?, ?, ?, ?)`,
+       monthly_analyses, features_ar, features_en, is_active, sort_order, created_at)
+     VALUES (?, ?, ?, ?, 'annual', ?, ?, ?, ?, ?, ?, ?)`,
     id,
     nameAr,
     nameEn,
     Math.max(0, Number(body.priceSar) || 0),
     body.maxUsers ? Number(body.maxUsers) : null,
+    body.monthlyAnalyses === null || body.monthlyAnalyses === '' || body.monthlyAnalyses === undefined
+      ? null
+      : Math.max(0, Number(body.monthlyAnalyses) || 0),
     JSON.stringify(Array.isArray(body.featuresAr) ? body.featuresAr.slice(0, 20) : []),
     JSON.stringify(Array.isArray(body.featuresEn) ? body.featuresEn.slice(0, 20) : []),
     body.isActive === false ? 0 : 1,
@@ -255,6 +259,14 @@ app.patch('/plans/:planId', async (c) => {
   if (body.maxUsers !== undefined) {
     fields.push('max_users = ?');
     params.push(body.maxUsers === null || body.maxUsers === '' ? null : Number(body.maxUsers) || null);
+  }
+  if (body.monthlyAnalyses !== undefined) {
+    fields.push('monthly_analyses = ?');
+    params.push(
+      body.monthlyAnalyses === null || body.monthlyAnalyses === ''
+        ? null
+        : Math.max(0, Number(body.monthlyAnalyses) || 0)
+    );
   }
   if (Array.isArray(body.featuresAr)) {
     fields.push('features_ar = ?');
