@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wusool",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      // Placeholder id for local development. A real D1 database is provisioned
+      // by the hosting platform (Sites → storage) before any deployment.
+      "database_name": "wusool-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      // Private bucket for payment-transfer proofs and (later) contract files.
+      // Never exposed publicly; every read goes through an authorised API route.
+      "binding": "FILES",
+      "bucket_name": "wusool-files"
+    }
+  ],
+  "vars": {
+    "APP_ENV": "development"
+  }
+}
