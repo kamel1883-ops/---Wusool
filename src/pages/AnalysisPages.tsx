@@ -54,6 +54,7 @@ type ListResponse = {
 const SOURCE_CLASS: Record<FieldSource, string> = {
   website: 'source-website',
   inference: 'source-inference',
+  suggestion: 'source-suggestion',
   missing: 'source-missing',
 };
 
@@ -64,7 +65,9 @@ function SourceTag({ source }: { source: FieldSource }) {
       ? t('analysis.sourceWebsite')
       : source === 'inference'
         ? t('analysis.sourceInference')
-        : t('analysis.sourceMissing');
+        : source === 'suggestion'
+          ? t('analysis.sourceSuggestion')
+          : t('analysis.sourceMissing');
   return <span className={cx('source-tag', SOURCE_CLASS[source])}>{label}</span>;
 }
 
@@ -548,6 +551,7 @@ function FieldEditor({ item, onChange }: { item: AnalysisItem; onChange: (item: 
         >
           <option value="website">{t('analysis.sourceWebsite')}</option>
           <option value="inference">{t('analysis.sourceInference')}</option>
+          <option value="suggestion">{t('analysis.sourceSuggestion')}</option>
           <option value="missing">{t('analysis.sourceMissing')}</option>
         </Select>
         <Input
@@ -821,7 +825,8 @@ export function AnalysisDetailPage() {
               {result.sourceSummary ? (
                 <span className="muted small">
                   {t('analysis.sourceWebsite')}: {result.sourceSummary.website} ·{' '}
-                  {t('analysis.sourceInference')}: {result.sourceSummary.inference}
+                  {t('analysis.sourceInference')}: {result.sourceSummary.inference} ·{' '}
+                  {t('analysis.sourceSuggestion')}: {result.sourceSummary.suggestion ?? 0}
                 </span>
               ) : null}
               {result.editedByUser ? <span className="badge badge-role">{t('analysis.edit')}</span> : null}

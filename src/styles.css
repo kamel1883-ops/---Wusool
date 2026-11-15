@@ -1911,6 +1911,12 @@ small,
   background: var(--surface-2, #eef3f7);
 }
 
+.source-suggestion {
+  color: #5b3fa8;
+  border-color: color-mix(in srgb, #8b5cf6 40%, transparent);
+  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+}
+
 .item-list {
   list-style: none;
   padding: 0;

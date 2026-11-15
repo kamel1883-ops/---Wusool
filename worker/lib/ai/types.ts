@@ -7,7 +7,7 @@
  * and optional evidence URL. `missing` values stay empty — nothing is invented.
  */
 
-export type FieldSource = 'website' | 'inference' | 'missing';
+export type FieldSource = 'website' | 'inference' | 'suggestion' | 'missing';
 
 export type AnalysisItem = {
   value: string;
@@ -187,7 +187,7 @@ export function emptyResult(): StructuredAnalysisResult {
   };
 }
 
-const SOURCES: FieldSource[] = ['website', 'inference', 'missing'];
+const SOURCES: FieldSource[] = ['website', 'inference', 'suggestion', 'missing'];
 
 function normalizeItem(raw: unknown, fallbackSource: FieldSource = 'inference'): AnalysisItem | null {
   if (typeof raw === 'string') {
@@ -278,10 +278,12 @@ export function overallConfidence(result: StructuredAnalysisResult): number {
 export function sourceSummary(result: StructuredAnalysisResult) {
   let website = 0;
   let inference = 0;
+  let suggestion = 0;
   const count = (field: FieldValue) => {
     if (!field.value) return;
     if (field.source === 'website') website += 1;
     if (field.source === 'inference') inference += 1;
+    if (field.source === 'suggestion') suggestion += 1;
   };
   count(result.company_profile.company_name);
   count(result.company_profile.industry);
@@ -289,5 +291,5 @@ export function sourceSummary(result: StructuredAnalysisResult) {
   count(result.mission);
   count(result.vision);
   for (const field of LIST_FIELDS) for (const entry of result[field]) count(entry as FieldValue);
-  return { website, inference, missing: result.missing_information.length };
+  return { website, inference, suggestion, missing: result.missing_information.length };
 }

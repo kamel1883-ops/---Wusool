@@ -70,12 +70,35 @@ type StartOutcome =
  * Concurrency guard. `excludeAnalysisId` lets the pipeline re-check without
  * counting the job it is currently running (it marks itself `queued` first).
  */
+/**
+ * Effective concurrency = min(platform cap, company plan cap).
+ * A plan without max_concurrent (NULL) inherits the platform cap.
+ */
+export async function effectiveConcurrency(env: Env, companyId: string, platformMax: number) {
+  const company = await first<{ plan_id: string | null }>(
+    env,
+    'SELECT plan_id FROM companies WHERE id = ?',
+    companyId
+  );
+  if (!company?.plan_id) return platformMax;
+  const plan = await first<{ max_concurrent: number | null }>(
+    env,
+    'SELECT max_concurrent FROM plans WHERE id = ?',
+    company.plan_id
+  );
+  if (plan && plan.max_concurrent !== null && plan.max_concurrent !== undefined) {
+    return Math.max(1, Math.min(platformMax, Number(plan.max_concurrent) || platformMax));
+  }
+  return platformMax;
+}
+
 export async function checkConcurrency(
   env: Env,
   companyId: string,
   limits: AnalysisLimits,
   excludeAnalysisId?: string
 ): Promise<{ ok: true } | { ok: false; code: string; status: number }> {
+  const cap = await effectiveConcurrency(env, companyId, limits.maxConcurrent);
   const running = await first<{ n: number }>(
     env,
     `SELECT COUNT(*) AS n FROM site_analyses
@@ -83,7 +106,7 @@ export async function checkConcurrency(
       ${excludeAnalysisId ? 'AND id != ?' : ''}`,
     ...(excludeAnalysisId ? [companyId, excludeAnalysisId] : [companyId])
   );
-  if ((running?.n ?? 0) >= limits.maxConcurrent) {
+  if ((running?.n ?? 0) >= cap) {
     return { ok: false, code: 'analysis_in_progress', status: 409 };
   }
   return { ok: true };
@@ -95,13 +118,14 @@ export async function checkAnalysisQuota(
   companyId: string,
   limits: AnalysisLimits
 ): Promise<{ ok: true } | { ok: false; code: string; status: number }> {
+  const cap = await effectiveConcurrency(env, companyId, limits.maxConcurrent);
   const running = await first<{ n: number }>(
     env,
     `SELECT COUNT(*) AS n FROM site_analyses
       WHERE company_id = ? AND status IN ('queued', 'crawling', 'extracting', 'analyzing')`,
     companyId
   );
-  if ((running?.n ?? 0) >= limits.maxConcurrent) {
+  if ((running?.n ?? 0) >= cap) {
     return { ok: false, code: 'analysis_in_progress', status: 409 };
   }
 
@@ -316,6 +340,15 @@ export async function runAnalysisPipeline(
     provider = resolveAiProvider(env, settings);
   } catch (error) {
     const code = error instanceof ProviderError ? error.code : 'ai_provider_not_configured';
+    await recordUsage(env, {
+      companyId,
+      userId: actor.id,
+      analysisId,
+      provider: 'unresolved',
+      model: 'unresolved',
+      status: 'error',
+      errorMessage: code,
+    });
     await markFailed(env, analysisId, companyId, code);
     await audit(env, {
       actorUserId: actor.id,

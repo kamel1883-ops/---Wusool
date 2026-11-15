@@ -1307,6 +1307,7 @@ export function AdminPlansPage() {
     priceSar: '',
     maxUsers: '',
     monthlyAnalyses: '',
+    maxConcurrent: '',
     featuresAr: '',
     featuresEn: '',
   });
@@ -1318,6 +1319,7 @@ export function AdminPlansPage() {
       priceSar: String(plan.priceSar),
       maxUsers: plan.maxUsers ? String(plan.maxUsers) : '',
       monthlyAnalyses: plan.monthlyAnalyses ?? '' ? String(plan.monthlyAnalyses ?? '') : '',
+      maxConcurrent: plan.maxConcurrent ?? '' ? String(plan.maxConcurrent ?? '') : '',
       featuresAr: plan.featuresAr.join('\n'),
       featuresEn: plan.featuresEn.join('\n'),
       isActive: plan.isActive,
@@ -1340,6 +1342,7 @@ export function AdminPlansPage() {
           priceSar: Number(draft.priceSar) || 0,
           maxUsers: draft.maxUsers ? Number(draft.maxUsers) : null,
           monthlyAnalyses: draft.monthlyAnalyses === '' ? null : Number(draft.monthlyAnalyses) || 0,
+          maxConcurrent: draft.maxConcurrent === '' ? null : Math.max(1, Number(draft.maxConcurrent) || 1),
           featuresAr: String(draft.featuresAr)
             .split('\n')
             .map((line) => line.trim())
@@ -1373,12 +1376,13 @@ export function AdminPlansPage() {
           priceSar: Number(newPlan.priceSar) || 0,
           maxUsers: newPlan.maxUsers ? Number(newPlan.maxUsers) : null,
           monthlyAnalyses: newPlan.monthlyAnalyses === '' ? null : Number(newPlan.monthlyAnalyses) || 0,
+          maxConcurrent: newPlan.maxConcurrent === '' ? null : Math.max(1, Number(newPlan.maxConcurrent) || 1),
           featuresAr: newPlan.featuresAr.split('\n').map((line) => line.trim()).filter(Boolean),
           featuresEn: newPlan.featuresEn.split('\n').map((line) => line.trim()).filter(Boolean),
         },
       });
       setOpen(false);
-      setNewPlan({ nameAr: '', nameEn: '', priceSar: '', maxUsers: '', monthlyAnalyses: '', featuresAr: '', featuresEn: '' });
+      setNewPlan({ nameAr: '', nameEn: '', priceSar: '', maxUsers: '', monthlyAnalyses: '', maxConcurrent: '', featuresAr: '', featuresEn: '' });
       reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.code : 'internal_error');
@@ -1451,6 +1455,16 @@ export function AdminPlansPage() {
                       dir="ltr"
                       value={draft.monthlyAnalyses}
                       onChange={(event) => updateDraft(plan, { monthlyAnalyses: event.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('plan.maxConcurrent')} htmlFor={`p-conc-${plan.id}`}>
+                    <Input
+                      id={`p-conc-${plan.id}`}
+                      type="number"
+                      min={1}
+                      dir="ltr"
+                      value={draft.maxConcurrent}
+                      onChange={(event) => updateDraft(plan, { maxConcurrent: event.target.value })}
                     />
                   </Field>
                 </div>
@@ -1550,6 +1564,16 @@ export function AdminPlansPage() {
                 dir="ltr"
                 value={newPlan.monthlyAnalyses}
                 onChange={(event) => setNewPlan({ ...newPlan, monthlyAnalyses: event.target.value })}
+              />
+            </Field>
+            <Field label={t('plan.maxConcurrent')} htmlFor="np-conc">
+              <Input
+                id="np-conc"
+                type="number"
+                min={1}
+                dir="ltr"
+                value={newPlan.maxConcurrent}
+                onChange={(event) => setNewPlan({ ...newPlan, maxConcurrent: event.target.value })}
               />
             </Field>
           </div>
@@ -2265,7 +2289,15 @@ type AdminAnalysis = {
 
 type AdminAnalysesData = {
   analyses: AdminAnalysis[];
-  ai: { provider: string; model: string; mock: boolean; configured: boolean; notice: string | null };
+  ai: {
+    provider: string;
+    model: string;
+    mock: boolean;
+    configured: boolean;
+    notice: string | null;
+    productionMockWarning: boolean;
+  };
+  crawlerProvider: string;
   limits: {
     defaultMaxPages: number;
     defaultMaxDepth: number;
@@ -2293,7 +2325,9 @@ export function AdminAnalysesPage() {
   const [rateLimit, setRateLimit] = useState(10);
   const [aiProvider, setAiProvider] = useState('mock');
   const [crawlerProvider, setCrawlerProvider] = useState('mock');
+  const [aiModel, setAiModel] = useState('');
   const [showCost, setShowCost] = useState(false);
+  const [testResult, setTestResult] = useState<{ target: string; ok: boolean; detail?: string; code?: string } | null>(null);
 
   useEffect(() => {
     if (!data) return;
@@ -2304,6 +2338,8 @@ export function AdminAnalysesPage() {
     setMaxConcurrent(data.limits.maxConcurrent);
     setRateLimit(data.limits.rateLimitPerHour);
     setAiProvider(data.ai.provider);
+    setAiModel(data.ai.model);
+    setCrawlerProvider(data.crawlerProvider ?? 'mock');
     setShowCost(data.limits.showCostToClient);
   }, [data]);
 
@@ -2316,6 +2352,23 @@ export function AdminAnalysesPage() {
       reload();
     } catch (err) {
       setError(errorKey((err as ApiError).code));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const testConnection = async (target: 'ai' | 'crawler') => {
+    setBusy(`test-${target}`);
+    setError(null);
+    setTestResult(null);
+    try {
+      const result = await api<{ ok: boolean; mock?: boolean; detail?: string; code?: string }>(
+        '/api/admin/settings/test-connection',
+        { method: 'POST', body: { target } }
+      );
+      setTestResult({ target, ...result });
+    } catch (err) {
+      setTestResult({ target, ok: false, code: (err as ApiError).code });
     } finally {
       setBusy(null);
     }
@@ -2337,6 +2390,7 @@ export function AdminAnalysesPage() {
             'analysis.max_concurrent_jobs': String(maxConcurrent),
             'analysis.rate_limit_per_hour': String(rateLimit),
             'analysis.ai_provider': aiProvider,
+            'analysis.ai_model': aiModel.trim() || data?.ai.model || 'gpt-4o-mini',
             'analysis.crawler_provider': crawlerProvider,
             'analysis.show_cost_to_client': showCost ? '1' : '0',
           },
@@ -2358,6 +2412,16 @@ export function AdminAnalysesPage() {
       <PageHeader title={t('admin.analysesTitle')} subtitle={t('admin.analysesSubtitle')} />
       {!data.ai.configured ? <Alert tone="danger">{t('admin.aiNotConfigured')}</Alert> : null}
       {data.ai.mock ? <Alert tone="warn">{t('analysis.mockNotice')}</Alert> : null}
+      {data.ai.productionMockWarning ? (
+        <Alert tone="danger">{t('admin.productionMockWarning')}</Alert>
+      ) : null}
+      {testResult ? (
+        <Alert tone={testResult.ok ? 'ok' : 'danger'} onClose={() => setTestResult(null)}>
+          {testResult.ok
+            ? `${t('admin.connectionOk')} (${testResult.detail ?? testResult.target})`
+            : `${t('admin.connectionFailed')}: ${t(errorKey(testResult.code))}`}
+        </Alert>
+      ) : null}
       {error ? <Alert tone="danger">{t(error)}</Alert> : null}
       {flash ? <Alert tone="ok">{flash}</Alert> : null}
 
@@ -2469,6 +2533,9 @@ export function AdminAnalysesPage() {
               <option value="openai">openai</option>
             </Select>
           </Field>
+          <Field label={t('admin.aiModelSetting')}>
+            <Input dir="ltr" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+          </Field>
           <Field label={t('admin.crawlerProviderSetting')}>
             <Select value={crawlerProvider} onChange={(e) => setCrawlerProvider(e.target.value)}>
               <option value="mock">mock</option>
@@ -2485,7 +2552,22 @@ export function AdminAnalysesPage() {
           <Button loading={busy === 'limits'} onClick={() => void saveLimits()}>
             {t('common.save')}
           </Button>
+          <Button
+            variant="secondary"
+            loading={busy === 'test-ai'}
+            onClick={() => void testConnection('ai')}
+          >
+            {t('admin.testAiConnection')}
+          </Button>
+          <Button
+            variant="secondary"
+            loading={busy === 'test-crawler'}
+            onClick={() => void testConnection('crawler')}
+          >
+            {t('admin.testCrawlerConnection')}
+          </Button>
         </div>
+        <p className="muted small">{t('admin.secretsNote')}</p>
       </Card>
     </>
   );

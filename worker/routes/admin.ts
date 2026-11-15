@@ -33,6 +33,8 @@ import { ROLE_PERMISSIONS, type CompanyRole } from '../lib/rbac';
 import { nextInvoiceNumber } from '../lib/invoices';
 import { analysisLimits, startAnalysisJob } from '../lib/analysis-pipeline';
 import { aiProviderStatus } from '../lib/ai';
+import { testOpenAIConnection } from '../lib/ai/openai';
+import { testCrawlerConnection } from '../lib/crawler/test';
 import { apiError } from './public';
 
 const app = new Hono<AppEnv>();
@@ -191,6 +193,7 @@ app.get('/plans', async (c) => {
       billingPeriod: row.billing_period,
       maxUsers: row.max_users,
       monthlyAnalyses: row.monthly_analyses ?? null,
+      maxConcurrent: row.max_concurrent ?? null,
       featuresAr: JSON.parse(row.features_ar || '[]'),
       featuresEn: JSON.parse(row.features_en || '[]'),
       isActive: Boolean(row.is_active),
@@ -209,8 +212,8 @@ app.post('/plans', async (c) => {
   await run(
     c.env,
     `INSERT INTO plans (id, name_ar, name_en, price_sar, billing_period, max_users,
-       monthly_analyses, features_ar, features_en, is_active, sort_order, created_at)
-     VALUES (?, ?, ?, ?, 'annual', ?, ?, ?, ?, ?, ?, ?)`,
+       monthly_analyses, max_concurrent, features_ar, features_en, is_active, sort_order, created_at)
+     VALUES (?, ?, ?, ?, 'annual', ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     nameAr,
     nameEn,
@@ -219,6 +222,9 @@ app.post('/plans', async (c) => {
     body.monthlyAnalyses === null || body.monthlyAnalyses === '' || body.monthlyAnalyses === undefined
       ? null
       : Math.max(0, Number(body.monthlyAnalyses) || 0),
+    body.maxConcurrent === null || body.maxConcurrent === '' || body.maxConcurrent === undefined
+      ? null
+      : Math.max(1, Number(body.maxConcurrent) || 1),
     JSON.stringify(Array.isArray(body.featuresAr) ? body.featuresAr.slice(0, 20) : []),
     JSON.stringify(Array.isArray(body.featuresEn) ? body.featuresEn.slice(0, 20) : []),
     body.isActive === false ? 0 : 1,
@@ -266,6 +272,14 @@ app.patch('/plans/:planId', async (c) => {
       body.monthlyAnalyses === null || body.monthlyAnalyses === ''
         ? null
         : Math.max(0, Number(body.monthlyAnalyses) || 0)
+    );
+  }
+  if (body.maxConcurrent !== undefined) {
+    fields.push('max_concurrent = ?');
+    params.push(
+      body.maxConcurrent === null || body.maxConcurrent === ''
+        ? null
+        : Math.max(1, Number(body.maxConcurrent) || 1)
     );
   }
   if (Array.isArray(body.featuresAr)) {
@@ -1119,6 +1133,15 @@ app.patch('/settings', async (c) => {
       patch[key] = [...new Set(locales)].join(',');
       continue;
     }
+    if (key === 'analysis.ai_provider' && !['mock', 'openai'].includes(value)) {
+      return apiError(c, 422, 'invalid_provider', { key });
+    }
+    if (key === 'analysis.crawler_provider' && !['mock', 'fetch', 'cloudflare'].includes(value)) {
+      return apiError(c, 422, 'invalid_provider', { key });
+    }
+    if (key === 'analysis.ai_model' && !value) {
+      return apiError(c, 422, 'invalid_model', { key });
+    }
     if (key === 'subscription.warning_days') {
       const days = Number(value);
       if (!Number.isFinite(days) || days < 1 || days > 365) {
@@ -1131,6 +1154,18 @@ app.patch('/settings', async (c) => {
   }
 
   if (!Object.keys(patch).length) return apiError(c, 422, 'no_changes');
+  if (patch['analysis.ai_provider'] !== undefined || patch['analysis.crawler_provider'] !== undefined) {
+    await audit(c.env, {
+      actorUserId: actor.id,
+      actorEmail: actor.email,
+      action: 'settings.provider_changed',
+      entityType: 'platform_settings',
+      meta: {
+        aiProvider: patch['analysis.ai_provider'] ?? null,
+        crawlerProvider: patch['analysis.crawler_provider'] ?? null,
+      },
+    });
+  }
   await setSettings(c.env, patch);
   await audit(c.env, {
     actorUserId: actor.id,
@@ -1140,6 +1175,52 @@ app.patch('/settings', async (c) => {
     meta: { keys: Object.keys(patch) },
   });
   return c.json({ ok: true });
+});
+
+/**
+ * Provider connection test. Runs a minimal upstream call (model list for AI,
+ * token verification for the Cloudflare crawler) — no tokens are spent and
+ * no customer data is involved. Secrets are never echoed back.
+ */
+app.post('/settings/test-connection', async (c) => {
+  const actor = c.get('user');
+  const body = await readJson<{ target?: string }>(c);
+  const target = str(body.target, 20);
+  const settings = await getSettings(c.env);
+
+  let outcome: { ok: boolean; mock?: boolean; detail?: string; code?: string };
+  if (target === 'ai') {
+    const status = aiProviderStatus(c.env, settings);
+    if (status.mock) {
+      outcome = { ok: true, mock: true, detail: 'mock_no_credentials_needed' };
+    } else if (status.provider === 'openai') {
+      const apiKey = String(c.env.AI_API_KEY ?? '');
+      if (!apiKey) outcome = { ok: false, code: 'ai_provider_not_configured' };
+      else {
+        const result = await testOpenAIConnection({
+          apiKey,
+          baseUrl: String(c.env.AI_GATEWAY_URL ?? 'https://api.openai.com/v1'),
+          model: status.model,
+        });
+        outcome = result.ok ? { ok: true, detail: 'openai_models_listed' } : { ok: false, code: result.code };
+      }
+    } else {
+      outcome = { ok: false, code: 'ai_provider_unsupported' };
+    }
+  } else if (target === 'crawler') {
+    outcome = await testCrawlerConnection(c.env, settings);
+  } else {
+    return apiError(c, 422, 'invalid_target');
+  }
+
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    action: 'settings.connection_tested',
+    entityType: 'platform_settings',
+    meta: { target, ok: outcome.ok, code: 'code' in outcome ? outcome.code : null },
+  });
+  return c.json(outcome, outcome.ok ? 200 : 422);
 });
 
 /**
@@ -1212,6 +1293,9 @@ app.get('/site-analyses', async (c) => {
     }),
     ai: aiProviderStatus(c.env, await getSettings(c.env)),
     limits: analysisLimits(c.env, await getSettings(c.env)),
+    crawlerProvider: String(
+      (await getSettings(c.env))['analysis.crawler_provider'] ?? 'mock'
+    ),
   });
 });
 

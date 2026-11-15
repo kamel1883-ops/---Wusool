@@ -180,6 +180,7 @@ export type Plan = {
   billingPeriod: string;
   maxUsers: number | null;
   monthlyAnalyses: number | null;
+  maxConcurrent: number | null;
   featuresAr: string[];
   featuresEn: string[];
   isActive: boolean;
@@ -244,7 +245,7 @@ export type AnalysisStatus =
   | 'failed'
   | 'cancelled';
 
-export type FieldSource = 'website' | 'inference' | 'missing';
+export type FieldSource = 'website' | 'inference' | 'suggestion' | 'missing';
 
 export type AnalysisItem = {
   value: string;
@@ -313,7 +314,7 @@ export type AnalysisResultPayload = {
   version: number;
   result: StructuredAnalysisResult | null;
   confidence: number | null;
-  sourceSummary: { website: number; inference: number; missing: number } | null;
+  sourceSummary: { website: number; inference: number; suggestion?: number; missing: number } | null;
   createdByAi: boolean;
   editedByUser: string | null;
   createdAt: string;

@@ -14,6 +14,8 @@ export type ProviderStatus = {
   configured: boolean;
   /** Translation key the UI shows when the provider can't run. */
   notice: string | null;
+  /** True when the deployment runs mock providers in production. */
+  productionMockWarning: boolean;
 };
 
 export function resolveAiProvider(env: Env, settings: Record<string, string>): AIProvider {
@@ -39,11 +41,13 @@ export function aiProviderStatus(env: Env, settings: Record<string, string>): Pr
   const provider = (String(env.AI_PROVIDER ?? settings['analysis.ai_provider'] ?? 'mock') || 'mock').toLowerCase();
   const mock = provider === 'mock';
   const configured = mock || (provider === 'openai' && Boolean(env.AI_API_KEY));
+  const production = String(env.APP_ENV ?? 'development').toLowerCase() === 'production';
   return {
     provider,
     model: String(env.AI_MODEL ?? settings['analysis.ai_model'] ?? (mock ? 'mock-structured-v1' : 'gpt-4o-mini')),
     mock,
     configured,
     notice: configured ? (mock ? 'ai.mockNotice' : null) : 'ai.notConfigured',
+    productionMockWarning: production && mock,
   };
 }

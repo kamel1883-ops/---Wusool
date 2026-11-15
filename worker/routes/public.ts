@@ -512,6 +512,7 @@ app.get('/public/plans', async (c) => {
         billingPeriod: plan.billing_period,
         maxUsers: plan.max_users,
         monthlyAnalyses: plan.monthly_analyses ?? null,
+        maxConcurrent: plan.max_concurrent ?? null,
         featuresAr: JSON.parse(plan.features_ar || '[]'),
         featuresEn: JSON.parse(plan.features_en || '[]'),
         prices: list.sort((a, b) => a.months - b.months),

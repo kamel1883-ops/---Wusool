@@ -148,6 +148,7 @@ async function main() {
   migrate('migrations/0002_site_analysis.sql');
   migrate('migrations/0003_orders.sql');
   migrate('migrations/0004_setup_codes.sql');
+  migrate('migrations/0005_concurrency.sql');
 
   console.log('· starting wrangler dev');
   pinSeedEmail();
