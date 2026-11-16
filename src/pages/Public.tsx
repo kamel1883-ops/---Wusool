@@ -201,12 +201,12 @@ const JOURNEY_STAGES: Array<{ n: number; icon: GlyphName; status: StageStatus; a
   { n: 1, icon: 'link', status: 'live', anchor: '#analysis' },
   { n: 2, icon: 'scan', status: 'live', anchor: '#analysis' },
   { n: 3, icon: 'strategy', status: 'partial', anchor: '#analysis' },
-  { n: 4, icon: 'audience', status: 'partial', anchor: '#analysis' },
-  { n: 5, icon: 'campaign', status: 'partial', anchor: '#content' },
+  { n: 4, icon: 'audience', status: 'live', anchor: '#leads' },
+  { n: 5, icon: 'campaign', status: 'partial', anchor: '#leads' },
   { n: 6, icon: 'design', status: 'planned', anchor: '#content' },
   { n: 7, icon: 'check', status: 'live', anchor: '#approval' },
-  { n: 8, icon: 'follow', status: 'planned', anchor: '#leads' },
-  { n: 9, icon: 'chart', status: 'planned', anchor: '#reports' },
+  { n: 8, icon: 'follow', status: 'partial', anchor: '#leads' },
+  { n: 9, icon: 'chart', status: 'partial', anchor: '#reports' },
 ];
 
 const STATUS_LABEL: Record<StageStatus, string> = {
@@ -752,7 +752,7 @@ function LeadsSection() {
       title={t('lp.leads.title')}
       sub={t('lp.leads.sub')}
       bullets={[t('lp.leads.b1'), t('lp.leads.b2'), t('lp.leads.b3')]}
-      status="planned"
+      status="partial"
       note={t('lp.leads.note')}
     />
   );

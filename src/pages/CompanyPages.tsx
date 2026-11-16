@@ -68,6 +68,9 @@ export function CompanyLayout() {
       ...(permissions.some((permission) => permission.startsWith('analysis.'))
         ? [{ to: `${base}/analyses`, label: t('nav.analyses'), icon: 'layers' as const }]
         : []),
+      ...(permissions.includes('leads.manage')
+        ? [{ to: `${base}/growth`, label: t('nav.growth'), icon: 'target' as const }]
+        : []),
       { to: `${base}/company`, label: t('nav.company'), icon: 'building' },
       { to: `${base}/team`, label: t('nav.team'), icon: 'users' },
     ];

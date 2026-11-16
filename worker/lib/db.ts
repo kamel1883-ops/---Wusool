@@ -21,6 +21,23 @@ export interface Env {
   // When set, /setup accepts only this address (case-insensitive) for the
   // first Super Admin. Never a real address in source — deployment secret.
   SETUP_ADMIN_EMAIL?: string;
+  // Lead discovery through a licensed data provider. Without all three the
+  // discovery endpoint refuses instead of returning invented records.
+  LEAD_DATA_PROVIDER?: string;
+  LEAD_DATA_API_URL?: string;
+  LEAD_DATA_API_KEY?: string;
+  // Outbound channels. Presence of credentials is not the same as permission:
+  // platform settings `integration.<channel>.approved` must also be set.
+  EMAIL_PROVIDER?: string;
+  EMAIL_API_KEY?: string;
+  EMAIL_FROM?: string;
+  WHATSAPP_TOKEN?: string;
+  WHATSAPP_PHONE_ID?: string;
+  META_PAGE_TOKEN?: string;
+  META_PAGE_ID?: string;
+  META_IG_USER_ID?: string;
+  LINKEDIN_TOKEN?: string;
+  LINKEDIN_ORGANIZATION_ID?: string;
 }
 
 export type Row = Record<string, any>;

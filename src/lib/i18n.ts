@@ -4,11 +4,14 @@
  * sees exists in both languages.
  */
 
+import { GROWTH_AR, GROWTH_EN } from './i18nGrowth';
+
 export type Locale = 'ar' | 'en';
 
 type Dict = Record<string, string>;
 
 const ar: Dict = {
+  ...GROWTH_AR,
   'app.name': 'وصول',
   'app.tagline': 'منصة ذكاء التسويق للشركات',
 
@@ -241,12 +244,12 @@ const ar: Dict = {
   'lp.content.b3': 'نسخ متعددة تُحفظ، بلا استبدال صامت لنسخة سابقة.',
   'lp.content.note': 'هذه الوحدة في المرحلتين الثالثة والرابعة من خارطة الطريق وليست متاحة في حسابك اليوم.',
 
-  'lp.leads.title': 'العملاء المحتملون والمتابعة',
-  'lp.leads.sub': 'سجل واحد لكل عميل محتمل من أول اهتمام إلى آخر تواصل.',
-  'lp.leads.b1': 'مراحل العميل المحتمل ومصدره والحملة التي جاء منها.',
-  'lp.leads.b2': 'مواعيد متابعة وسجل نشاط لكل عميل داخل مساحة الشركة.',
-  'lp.leads.b3': 'موافقة تواصل صريحة وقائمة منع تواصل قبل أي إرسال.',
-  'lp.leads.note': 'هذه الوحدة في المرحلة الخامسة، ولا يوجد إرسال بريد أو واتساب في النسخة الحالية.',
+  'lp.leads.title': 'اكتساب العملاء والتحويل',
+  'lp.leads.sub': 'من ملف عميل مثالي مبني على تحليل معتمد إلى عملاء لهم دليل ومصدر، ثم حملة لا تُرسل قبل فحص الجاهزية.',
+  'lp.leads.b1': 'ملف العميل المثالي: الخدمات والقطاعات والمدن والكلمات المفتاحية، مع دليل كل بند من التقرير.',
+  'lp.leads.b2': 'كل عميل محتمل يحمل سبب الترشيح ورابط مصدره ودرجة تأهيل قابلة للتفسير؛ والبريد أو الهاتف يُخزَّن بمصدره المعلن فقط.',
+  'lp.leads.b3': 'موافقة تواصل صريحة وقائمة منع تواصل، وحملة تُحجب تلقائيًا حتى تتصل القناة ويُعتمد المحتوى.',
+  'lp.leads.note': 'متاحة الآن بالعمل اليدوي الموثّق. الاكتشاف الآلي يحتاج مزوّد بيانات مرخّصًا، والقنوات تظهر «يتطلب اعتمادات» حتى ربطها رسميًا.',
 
   'lp.approval.title': 'اعتماد العميل قبل النشر أو الإرسال',
   'lp.approval.sub': 'المبدأ نفسه مطبّق اليوم على تقارير التحليل، وسيُطبّق على كل مادة لاحقًا.',
@@ -950,6 +953,7 @@ const ar: Dict = {
 };
 
 const en: Dict = {
+  ...GROWTH_EN,
   'app.name': 'Wusool',
   'app.tagline': 'Marketing intelligence for B2B teams',
 
@@ -1182,12 +1186,12 @@ const en: Dict = {
   'lp.content.b3': 'Multiple versions kept, with no silent replacement of an earlier one.',
   'lp.content.note': 'This module is phases 3 and 4 of the roadmap and is not available in your account today.',
 
-  'lp.leads.title': 'Leads and follow-up',
-  'lp.leads.sub': 'One record per lead, from first interest to last contact.',
-  'lp.leads.b1': 'Lead stages, source and the campaign it came from.',
-  'lp.leads.b2': 'Follow-up dates and an activity log for every lead inside the company workspace.',
-  'lp.leads.b3': 'Explicit contact consent and a suppression list before anything is sent.',
-  'lp.leads.note': 'This module is phase 5; no email or WhatsApp sending exists in the current version.',
+  'lp.leads.title': 'Lead acquisition and conversion',
+  'lp.leads.sub': 'From an ideal customer profile built on an approved analysis, to leads with evidence and a source, to a campaign that cannot send before preflight.',
+  'lp.leads.b1': 'Ideal customer profile: services, sectors, cities and keywords, each with its evidence from the report.',
+  'lp.leads.b2': 'Every lead carries its reason, source link and an explainable score; email or phone is stored only with its stated origin.',
+  'lp.leads.b3': 'Explicit consent and a do-not-contact list, and a campaign that stays blocked until its channel is connected and content approved.',
+  'lp.leads.note': 'Available now through documented manual work. Automatic discovery needs a licensed data provider, and channels read “requires credentials” until connected officially.',
 
   'lp.approval.title': 'Client approval before publishing or sending',
   'lp.approval.sub': 'The same principle applied today to analysis reports, and later to every asset.',

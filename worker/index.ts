@@ -3,6 +3,7 @@ import type { AppEnv } from './lib/auth';
 import publicRoutes from './routes/public';
 import companyRoutes from './routes/company';
 import analysisRoutes from './routes/analysis';
+import growthRoutes from './routes/growth';
 import adminRoutes from './routes/admin';
 import purchaseAdminRoutes from './routes/purchase-admin';
 
@@ -41,6 +42,7 @@ app.use('/api/*', async (c, next) => {
 app.route('/api', publicRoutes);
 app.route('/api/company', companyRoutes);
 app.route('/api/company', analysisRoutes);
+app.route('/api/company', growthRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin', purchaseAdminRoutes);
 

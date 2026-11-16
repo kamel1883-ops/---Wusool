@@ -14,9 +14,17 @@ type IconName =
   | 'chart'
   | 'file'
   | 'shield'
-  | 'layers';
+  | 'layers'
+  | 'target';
 
 const ICONS: Record<IconName, ReactNode> = {
+  target: (
+    <>
+      <circle cx="12" cy="12" r="7.5" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </>
+  ),
   grid: (
     <>
       <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" />

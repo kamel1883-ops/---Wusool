@@ -39,6 +39,7 @@
 | `/subscription` الاشتراك والفواتير | owner فقط |
 | `/activity` سجل النشاط | owner فقط |
 | `/settings` اللغة وكلمة المرور | كل الأعضاء |
+| `/growth` اكتساب العملاء | `leads.manage` (قراءة `reports.view`) |
 
 ### لوحة Super Admin — `/admin/*`
 `/` نظرة عامة · `/companies` · `/companies/:id` · `/invoices` · `/plans` · `/users` ·
@@ -73,6 +74,15 @@
 | POST | `/api/company/:id/invoices/:invoiceId/proofs` | `billing.manage` (multipart, ≤٥MB) |
 | GET | `/api/company/:id/proofs/:proofId/file` | `billing.manage` |
 | GET | `/api/company/:id/activity` | `team.manage` |
+
+### اكتساب العملاء (`/api/company/:companyId/growth/*`)
+
+`GET /growth` · `PUT /growth/icp` · `POST /growth/icp/derive` · `POST /growth/discover` ·
+`GET|POST /growth/leads` · `PATCH /growth/leads/:id` · `GET|POST /growth/leads/:id/activities` ·
+`GET|POST /growth/suppressions` · `GET|POST /growth/campaigns` · `PATCH /growth/campaigns/:id` ·
+`POST /growth/campaigns/:id/preflight` · `POST /growth/campaigns/:id/launch` · `GET|POST /growth/metrics`
+
+كلها تتطلب `requireAuth` + `companyContext`؛ الكتابة تتطلب `leads.manage`.
 
 ### لوحة الإدارة (Super Admin)
 | METHOD | المسار | الوصف |

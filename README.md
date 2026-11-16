@@ -39,6 +39,7 @@
 | الرابط والمهمة | تحقق من الرابط (رفض loopback والشبكات الخاصة)، موافقة صريحة، وحالات `draft → queued → crawling → extracting → analyzing → awaiting_review → approved / changes_requested / failed / cancelled` |
 | الزحف | `SiteCrawlerProvider`: `mock` للتطوير، `fetch` زاحف حقيقي داخل الـ Worker (نطاق واحد، robots.txt، حدود صفحات/عمق، مهلة، سقف حجم، لا تجاوز حماية)، و`cloudflare` هيكل جاهز |
 | الذكاء الاصطناعي | `AIProvider`: `MockAIProvider` حتمي و`OpenAIProvider` متوافق مع OpenAI. الاختيار من الخادم، المفتاح في الأسرار فقط |
+| اكتساب العملاء | ICP من التحليل المعتمد + عملاء بدليل ومصدر + درجات تأهيل + موافقة ومنع تواصل + حملات بفحص جاهزية + نتائج يدوية. الاكتشاف الآلي يحتاج مزوّد بيانات مرخّصًا (`LEAD_DATA_PROVIDER`, `LEAD_DATA_API_URL`, `LEAD_DATA_API_KEY`) وإلا يظهر «غير مفعّل» |
 | التقرير | ٢٣ قسمًا (بيانات الشركة، الرسالة، الرؤية، القيم، الخدمات، الجمهور، الشخصيات، القيمة المقترحة، القنوات، الحملات، الخارطة، المؤشرات، النواقص، الافتراضات) وكل معلومة بمصدرها `website/inference/missing` ودرجة ثقتها |
 | الاعتماد | نسخ غير قابلة للاستبدال، `submit-review`، `request-changes`، `approve` (مالك الشركة)، وتعديل المعتمد يعيده للمراجعة |
 | الإدارة | متابعة المهام، إعادة تشغيل، إلغاء، حدود التحليل (صفحات/عمق/تزامن/سعر الساعة)، أخطاء تقنية واستهلاك المزوّدين — بلا محتوى تقرير العميل |
@@ -56,7 +57,10 @@ npm run check && npm run build && npm test
 
 > الوضع الافتراضي **تجريبي** (`mock` للزحف والذكاء الاصطناعي): لا يحتاج أي مفاتيح، والواجهة
 > تعرض ذلك بوضوح. للانتقال إلى مزوّد حقيقي أضف أسرار العامل (`AI_PROVIDER`, `AI_MODEL`,
-> `AI_API_KEY`, `AI_GATEWAY_URL`, `CRAWLER_PROVIDER`, `CRAWLER_ACCOUNT_ID`,
+> `AI_API_KEY`, `AI_GATEWAY_URL`, `CRAWLER_PROVIDER`, `CRAWLER_ACCOUNT_ID`.
+> قنوات الحملات: `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM` (منفّذة)، و`WHATSAPP_TOKEN`,
+> `WHATSAPP_PHONE_ID`, `META_PAGE_TOKEN`, `META_PAGE_ID`, `LINKEDIN_TOKEN`, `LINKEDIN_ORGANIZATION_ID`
+> (تظهر «يتطلب اعتمادات» حتى تتوفر وتُعتمد). لا يوجد إرسال بلا اعتماد محتوى وفحص جاهزية.
 > `CRAWLER_API_TOKEN`) وبدّل المزوّد من إعدادات المنصة. لا يُرسل أي مفتاح إلى المتصفح.
 
 ---
