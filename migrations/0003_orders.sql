@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   months INTEGER NOT NULL CHECK (months IN (3, 6, 9, 12)),
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
-  password_iterations INTEGER NOT NULL DEFAULT 210000,
+  password_iterations INTEGER NOT NULL DEFAULT 100000, -- Workers caps PBKDF2 at 100k
   status TEXT NOT NULL DEFAULT 'pending_review'
     CHECK (status IN ('pending_review', 'approved', 'rejected')),
   review_note TEXT,

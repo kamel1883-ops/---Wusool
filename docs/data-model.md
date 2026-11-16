@@ -49,7 +49,7 @@
 | `email` | TEXT UNIQUE (lowercase) |
 | `name` | TEXT |
 | `password_hash`, `password_salt` | TEXT |
-| `password_iterations` | INTEGER (210000) |
+| `password_iterations` | INTEGER (100000) |
 | `locale` | CHECK `ar｜en` |
 | `platform_role` | CHECK `none｜super_admin` |
 | `status` | CHECK `active｜disabled` |

@@ -1202,7 +1202,15 @@ app.post('/settings/test-connection', async (c) => {
           baseUrl: String(c.env.AI_GATEWAY_URL ?? 'https://api.openai.com/v1'),
           model: status.model,
         });
-        outcome = result.ok ? { ok: true, detail: 'openai_models_listed' } : { ok: false, code: result.code };
+        outcome = result.ok
+          ? { ok: true, detail: result.via === 'chat' ? 'openai_chat_ok' : 'openai_models_listed' }
+          : {
+              ok: false,
+              code: result.code,
+              // Safe diagnostics: status + provider error code only, never
+              // the key, the request body or an upstream message.
+              detail: [result.status, result.upstreamCode].filter(Boolean).join(':') || undefined,
+            };
       }
     } else {
       outcome = { ok: false, code: 'ai_provider_unsupported' };

@@ -13,7 +13,13 @@ import { nowIso, first, randomHex, run } from './db';
 
 export const SESSION_COOKIE = 'ws_session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
-export const PASSWORD_ITERATIONS = 210_000;
+// Cloudflare Workers caps PBKDF2 at 100,000 iterations at runtime: anything
+// above it throws NotSupportedError instead of hashing (workerd enforces the
+// limit before spending CPU). 100,000 is therefore the strongest setting that
+// works in production; local `wrangler dev` does not enforce the cap, so a
+// higher value only fails once deployed.
+export const PASSWORD_ITERATIONS = 100_000;
+const MAX_PBKDF2_ITERATIONS = 100_000;
 export const MIN_PASSWORD_LENGTH = 10;
 
 export type AuthUser = {
@@ -63,6 +69,9 @@ export async function hashPassword(
   saltHex: string,
   iterations = PASSWORD_ITERATIONS
 ) {
+  // Clamp so a row written by an older build (or hand-edited) can still be
+  // verified rather than throwing on the runtime's iteration cap.
+  const rounds = Math.min(Math.max(iterations, 1), MAX_PBKDF2_ITERATIONS);
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
     encoder.encode(password),
@@ -71,7 +80,7 @@ export async function hashPassword(
     ['deriveBits']
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: hexToBytes(saltHex), iterations },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: hexToBytes(saltHex), iterations: rounds },
     keyMaterial,
     256
   );

@@ -12,6 +12,10 @@ const RATES: Array<{ match: RegExp; rate: ModelRate }> = [
   { match: /gpt-4o\b/i, rate: { input: 2.5, output: 10.0 } },
   { match: /o4-mini|o3-mini/i, rate: { input: 1.1, output: 4.4 } },
   { match: /llama-3/i, rate: { input: 0.2, output: 0.2 } },
+  // Cloudflare Workers AI (published unit pricing, USD per 1M tokens)
+  { match: /@cf\/google\/gemma-4/i, rate: { input: 0.1, output: 0.3 } },
+  { match: /@cf\/qwen\/qwen3\.8-27b/i, rate: { input: 0.45, output: 3.2 } },
+  { match: /@cf\//i, rate: { input: 0.2, output: 0.6 } },
 ];
 
 const GENERIC_RATE: ModelRate = { input: 0.5, output: 1.5 };

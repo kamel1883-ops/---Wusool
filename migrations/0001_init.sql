@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
-  password_iterations INTEGER NOT NULL DEFAULT 210000,
+  password_iterations INTEGER NOT NULL DEFAULT 100000, -- Workers caps PBKDF2 at 100k
   locale TEXT NOT NULL DEFAULT 'ar' CHECK (locale IN ('ar', 'en')),
   platform_role TEXT NOT NULL DEFAULT 'none' CHECK (platform_role IN ('none', 'super_admin')),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
