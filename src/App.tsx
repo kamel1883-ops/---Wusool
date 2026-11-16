@@ -10,8 +10,8 @@ import {
   LoginPage,
   NotFoundPage,
   OrderPage,
+  OwnerPortalPage,
   PrivacyPage,
-  SetupPage,
   SupportPage,
   TermsPage,
 } from './pages/Public';
@@ -60,7 +60,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
 function RequireAdmin({ children }: { children: ReactNode }) {
   const { me, loading, t } = useSession();
   if (loading) return <FullPageLoading label={t('common.loading')} />;
-  if (!me) return <Navigate to="/login" replace />;
+  // The owner portal is private and unlinked; a signed-out owner lands there
+  // rather than on the company portal.
+  if (!me) return <Navigate to="/owner" replace />;
   if (me.user.platformRole !== 'super_admin') return <AccessDeniedPage />;
   return <>{children}</>;
 }
@@ -73,7 +75,9 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot" element={<ForgotPage />} />
-          <Route path="/setup" element={<SetupPage />} />
+          <Route path="/owner" element={<OwnerPortalPage />} />
+          {/* Legacy bookmark: the owner entrance now lives at /owner. */}
+          <Route path="/setup" element={<Navigate to="/owner" replace />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/support" element={<SupportPage />} />

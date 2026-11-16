@@ -136,7 +136,7 @@ export function AppShell({
       <div className="shell-scrim" onClick={() => setOpen(false)} aria-hidden />
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <img src={me?.branding.logoUrl ?? '/brand/logo.jpg'} alt="" className="logo-tile" />
+          <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" className="logo-tile" />
           <div className="sidebar-brand-text">
             <strong>{brandName || 'وصول'}</strong>
             <span dir={locale === 'ar' ? 'ltr' : 'rtl'}>{brandAlt || 'Wusool'}</span>
@@ -220,7 +220,7 @@ export function AppShell({
 export function FullPageLoading({ label }: { label?: string }) {
   return (
     <div className="boot-screen">
-      <img src="/brand/logo.jpg" alt="" className="boot-logo" />
+      <img src="/brand/logo.svg" alt="" className="boot-logo" />
       <span className="spinner" aria-hidden />
       {label ? <p>{label}</p> : null}
     </div>

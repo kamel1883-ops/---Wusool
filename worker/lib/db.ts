@@ -104,7 +104,7 @@ export async function settingsList(env: Env) {
       taglineEn: s['brand.tagline_en'] ?? '',
       primaryColor: s['brand.primary_color'] ?? '#17C6B4',
       inkColor: s['brand.ink_color'] ?? '#0E1B2D',
-      logoUrl: s['brand.logo_url'] ?? '/brand/logo.jpg',
+      logoUrl: s['brand.logo_url'] ?? '/brand/logo.svg',
       website: s['brand.website'] ?? '',
     },
     support: { email: s['support.email'] ?? '', whatsapp: s['support.whatsapp'] ?? '' },

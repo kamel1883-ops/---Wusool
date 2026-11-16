@@ -48,7 +48,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
     <div className="public">
       <header className="public-head">
         <Link to="/" className="public-brand">
-          <img src={me?.branding.logoUrl ?? '/brand/logo.jpg'} alt="" className="logo-tile" />
+          <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" className="logo-tile" />
           <div>
             <strong>{locale === 'ar' ? brandName : me?.branding.nameEn ?? 'Wusool'}</strong>
             <span>{locale === 'ar' ? me?.branding.taglineEn ?? 'Wusool' : brandName}</span>
@@ -88,7 +88,6 @@ function PublicLayout({ children }: { children: ReactNode }) {
           <Link to="/terms">{t('landing.terms')}</Link>
           <Link to="/privacy">{t('landing.privacy')}</Link>
           <Link to="/support">{t('landing.support')}</Link>
-          <Link to="/setup">{t('auth.ownerPortal')}</Link>
         </span>
       </footer>
     </div>
@@ -147,10 +146,10 @@ export function LandingPage() {
           </ul>
         </div>
         <aside className="hero-visual">
-          <BrandImg src="/brand/hero-team.jpg" alt={t('landing2.imgAlt')} className="hero-img-main" />
+          <BrandImg src="/brand/hero-team.svg" alt={t('landing2.imgAlt')} className="hero-img-main" />
           <div className="hero-visual-side">
-            <BrandImg src="/brand/hero-office.jpg" alt={t('landing2.imgAlt')} className="hero-img-side" />
-            <BrandImg src="/brand/hero-market.jpg" alt={t('landing2.imgAlt')} className="hero-img-side" />
+            <BrandImg src="/brand/hero-office.svg" alt={t('landing2.imgAlt')} className="hero-img-side" />
+            <BrandImg src="/brand/hero-market.svg" alt={t('landing2.imgAlt')} className="hero-img-side" />
           </div>
         </aside>
       </section>
@@ -215,8 +214,16 @@ type PublicPlan = {
 function BrandImg({ src, alt, className }: { src: string; alt: string; className?: string }) {
   const [missing, setMissing] = useState(false);
   if (missing) {
+    // Never leave an empty rectangle: show the brand mark instead of a blank
+    // block when a photo has not been uploaded yet.
     return (
-      <div className={className ? `${className} img-fallback` : 'img-fallback'} role="img" aria-label={alt} />
+      <div
+        className={className ? `${className} img-fallback` : 'img-fallback'}
+        role="img"
+        aria-label={alt}
+      >
+        <img src="/brand/logo.svg" alt="" className="img-fallback-logo" />
+      </div>
     );
   }
   return <img src={src} alt={alt} className={className} loading="lazy" onError={() => setMissing(true)} />;
@@ -455,7 +462,7 @@ function AuthPanel({ children }: { children: ReactNode }) {
     <div className="auth-page">
       <aside className="auth-aside">
         <div className="auth-aside-brand">
-          <img src={me?.branding.logoUrl ?? '/brand/logo.jpg'} alt="" />
+          <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" />
           <div>
             <strong>{locale === 'ar' ? 'وصول' : 'Wusool'}</strong>
             <span>{t('app.tagline')}</span>
@@ -533,9 +540,87 @@ export function LoginPage() {
         </Button>
         <div className="auth-links">
           <Link to="/forgot">{t('auth.forgot')}</Link>
-          <Link to="/setup">{t('auth.setupTitle')}</Link>
         </div>
       </form>
+    </AuthPanel>
+  );
+}
+
+/**
+ * Private owner entrance. Deliberately unlinked from every public page: the
+ * company portal is /login, while the platform owner enters here (and creates
+ * the first account here while the platform is still empty). Route-level and
+ * API-level role checks keep the two portals apart.
+ */
+export function OwnerPortalPage() {
+  const { me, refresh, loading, t, signOut } = useSession();
+  const navigate = useNavigate();
+  const branding = useApi<BrandingPayload>('/api/public/branding');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (loading || branding.loading) return <FullPageLoading />;
+  if (branding.data && !branding.data.platform.setupCompleted) return <SetupPage />;
+  if (me?.user.platformRole === 'super_admin') return <Navigate to="/admin" replace />;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/api/auth/login', { method: 'POST', body: { email, password } });
+      const result = await refresh();
+      if (!result || result.user.platformRole !== 'super_admin') {
+        await signOut();
+        setError('owner_portal_only');
+        return;
+      }
+      navigate('/admin', { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.code : 'internal_error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthPanel>
+      <span className="owner-badge">{t('owner.badge')}</span>
+      <h1>{t('owner.title')}</h1>
+      <p className="muted">{t('owner.subtitle')}</p>
+      {error ? <Alert tone="danger">{t(errorKey(error))}</Alert> : null}
+      <form onSubmit={submit} className="stack">
+        <Field label={t('common.email')} htmlFor="owner-email">
+          <Input
+            id="owner-email"
+            type="email"
+            dir="ltr"
+            autoComplete="username"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </Field>
+        <Field label={t('common.password')} htmlFor="owner-password">
+          <Input
+            id="owner-password"
+            type="password"
+            dir="ltr"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </Field>
+        <Button type="submit" loading={busy}>
+          {t('auth.signIn')}
+        </Button>
+      </form>
+      <div className="auth-links">
+        <Link to="/login">{t('owner.companyPortal')}</Link>
+      </div>
     </AuthPanel>
   );
 }
