@@ -28,7 +28,8 @@
       "bucket_name": "wusool-files"
     }
   ],
-  "vars": {
-    "APP_ENV": "development"
-  }
+  // NOTE: no `vars` here — Freebuff Sites does not deploy Wrangler vars.
+  // Plain (non-secret) variables such as APP_ENV are set in
+  // Manage site → Variables; secrets are set in Sites → Secrets.
+  // Code treats a missing APP_ENV as "development".
 }
