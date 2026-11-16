@@ -619,6 +619,7 @@ function FeatureSection() {
 function SplitFeature({
   id,
   image,
+  image2,
   title,
   sub,
   bullets,
@@ -628,6 +629,7 @@ function SplitFeature({
 }: {
   id: string;
   image: string;
+  image2?: string;
   title: string;
   sub: string;
   bullets: string[];
@@ -639,10 +641,8 @@ function SplitFeature({
   return (
     <section className="lp-inner lp-section" id={id}>
       <Reveal>
+        {/* Copy first so RTL places it on the right, media opposite. */}
         <div className="lp-split">
-          <div className="lp-split-media">
-            <BrandImg src={image} alt={title} className="lp-figure-img" />
-          </div>
           <div className="lp-split-copy">
             {status ? <StatusChip status={status} t={t} /> : null}
             <h2>{title}</h2>
@@ -658,6 +658,10 @@ function SplitFeature({
                 {cta}
               </Link>
             ) : null}
+          </div>
+          <div className={image2 ? 'lp-split-media lp-media-stack' : 'lp-split-media'}>
+            <BrandImg src={image} alt={title} className="lp-figure-img" />
+            {image2 ? <BrandImg src={image2} alt={title} className="lp-figure-img" /> : null}
           </div>
         </div>
       </Reveal>
@@ -685,7 +689,8 @@ function ContentSection() {
   return (
     <SplitFeature
       id="content"
-      image="/brand/scene-content.svg"
+      image="/brand/scene-campaign.svg"
+      image2="/brand/scene-content.svg"
       title={t('lp.content.title')}
       sub={t('lp.content.sub')}
       bullets={[t('lp.content.b1'), t('lp.content.b2'), t('lp.content.b3')]}
