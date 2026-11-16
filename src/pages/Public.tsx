@@ -100,6 +100,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
         <nav className="public-nav">
           <Link to="/#journey">{t('lp.nav.journey')}</Link>
           <Link to="/#features">{t('lp.nav.features')}</Link>
+          <Link to="/#roadmap">{t('lp.nav.roadmap')}</Link>
           <Link to="/#plans">{t('lp.nav.plans')}</Link>
           <Link to="/#faq">{t('lp.nav.faq')}</Link>
           <div className="lang-switch" role="group" aria-label="language">
@@ -141,6 +142,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
             <h4>{t('lp.footer.product')}</h4>
             <Link to="/#journey">{t('lp.nav.journey')}</Link>
             <Link to="/#features">{t('lp.nav.features')}</Link>
+            <Link to="/#roadmap">{t('lp.nav.roadmap')}</Link>
             <Link to="/#plans">{t('lp.nav.plans')}</Link>
             <Link to="/#faq">{t('lp.nav.faq')}</Link>
           </div>
@@ -383,6 +385,11 @@ function Hero() {
           {t('lp.hero.titleA')} <span className="lp-gradient">{t('lp.hero.titleB')}</span>
         </h1>
         <p className="lp-lead">{t('lp.hero.lead')}</p>
+        <ul className="lp-hero-truth">
+          <li>{t('lp.hero.truthA')}</li>
+          <li>{t('lp.hero.truthB')}</li>
+          <li>{t('lp.hero.truthC')}</li>
+        </ul>
         <div className="lp-actions">
           <Link to="/order" className="btn btn-primary btn-lg">
             {t('lp.hero.ctaPrimary')}
@@ -800,6 +807,46 @@ function PlansBlock() {
   );
 }
 
+/**
+ * The work plan is read from the repository's own roadmap: what ships today,
+ * what is partially built, and what still waits on an external approval.
+ */
+function RoadmapSection() {
+  const { t } = useSession();
+  const phases: Array<{ n: number; status: 'done' | 'partial' | 'planned'; tone: StageStatus }> = [
+    { n: 1, status: 'done', tone: 'live' },
+    { n: 2, status: 'done', tone: 'live' },
+    { n: 3, status: 'partial', tone: 'partial' },
+    { n: 4, status: 'planned', tone: 'planned' },
+    { n: 5, status: 'partial', tone: 'partial' },
+    { n: 6, status: 'partial', tone: 'partial' },
+  ];
+  return (
+    <section className="lp-inner lp-section" id="roadmap">
+      <SectionHead title={t('lp.roadmap.title')} sub={t('lp.roadmap.sub')} />
+      <ol className="lp-roadmap">
+        {phases.map((phase) => (
+          <Reveal key={phase.n} delay={phase.n * 40}>
+            <li className={`lp-roadmap-item is-${phase.tone}`}>
+              <span className="lp-roadmap-number">{String(phase.n).padStart(2, '0')}</span>
+              <div className="lp-roadmap-body">
+                <div className="lp-roadmap-head">
+                  <h3>{t(`lp.roadmap.${phase.n}t`)}</h3>
+                  <span className={`lp-status lp-status-${phase.tone}`}>
+                    {t(`lp.roadmap.state.${phase.status}`)}
+                  </span>
+                </div>
+                <p>{t(`lp.roadmap.${phase.n}b`)}</p>
+              </div>
+            </li>
+          </Reveal>
+        ))}
+      </ol>
+      <p className="lp-note">{t('lp.roadmap.note')}</p>
+    </section>
+  );
+}
+
 function TrustSection() {
   const { t } = useSession();
   const items: Array<[string, string]> = [
@@ -887,6 +934,7 @@ export function LandingPage() {
       <LeadsSection />
       <ApprovalSection />
       <ReportsSection />
+      <RoadmapSection />
       <PlansBlock />
       <TrustSection />
       <FaqSection />
@@ -1170,7 +1218,7 @@ export function OrderPage() {
 }
 
 function AuthPanel({ children }: { children: ReactNode }) {
-  const { locale, t } = useSession();
+  const { locale, t, me } = useSession();
   return (
     <div className="auth-page">
       <aside className="auth-aside">
@@ -1192,7 +1240,16 @@ function AuthPanel({ children }: { children: ReactNode }) {
         <Link to="/" className="auth-home">
           <span aria-hidden="true">{locale === 'ar' ? '→' : '←'}</span> {t('legal.back')}
         </Link>
+        <div className="auth-stack">
+        <div className="auth-brand-row">
+          <BrandLogo className="auth-brand-mark" />
+          <div>
+            <strong>{locale === 'ar' ? me?.branding.nameAr ?? 'وصول' : me?.branding.nameEn ?? 'Wusool'}</strong>
+            <span>{locale === 'ar' ? me?.branding.nameEn ?? 'Wusool' : me?.branding.nameAr ?? 'وصول'}</span>
+          </div>
+        </div>
         <div className="auth-card">{children}</div>
+        </div>
       </main>
     </div>
   );

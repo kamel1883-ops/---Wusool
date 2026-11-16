@@ -165,12 +165,12 @@ export function CompanyDashboardPage() {
     return null;
   })();
 
-  const modules: Array<{ key: string; phase: string; enabled?: boolean }> = [
-    { key: 'siteAnalysis', phase: 'module.phase2' },
+  const modules: Array<{ key: string; phase: string; to?: string }> = [
+    { key: 'siteAnalysis', phase: 'module.available', to: 'analyses' },
+    { key: 'growth', phase: 'module.available', to: 'growth' },
     { key: 'strategy', phase: 'module.phase3' },
     { key: 'content', phase: 'module.phase3' },
     { key: 'design', phase: 'module.phase4' },
-    { key: 'crm', phase: 'module.phase5' },
     { key: 'messaging', phase: 'module.phase5' },
     { key: 'reports', phase: 'module.phase6' },
   ];
@@ -298,8 +298,8 @@ export function CompanyDashboardPage() {
                   ) : null}
                 </>
               );
-              return module.key === 'siteAnalysis' ? (
-                <Link className="module-card module-card-link" key={module.key} to="analyses">
+              return module.to ? (
+                <Link className="module-card module-card-link" key={module.key} to={module.to}>
                   {inner}
                 </Link>
               ) : (

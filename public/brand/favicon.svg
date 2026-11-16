@@ -1,13 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Wusool">
   <defs>
-    <linearGradient id="ws-fav" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2BE3CE"/>
-      <stop offset="1" stop-color="#0E1B2D"/>
+    <linearGradient id="wusool-teal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1AD3BF" />
+      <stop offset="1" stop-color="#0FB2A1" />
     </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="8" fill="url(#ws-fav)"/>
-  <path d="M9 21 H15" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
-  <path d="M9 26 H12" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
-  <path d="M21 24 V12" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
-  <path d="M17 16 L21 11.5 L25 16" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect width="512" height="512" rx="116" fill="#0E1B2D" />
+  <g transform="translate(42 34) scale(0.84)">
+    <g fill="none" stroke="url(#wusool-teal)" stroke-width="31" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M116 214 L194 374 L248 272" />
+      <path d="M270 272 L324 374 L402 214" />
+    </g>
+    <path d="M254 322 L254 196 L208 196 L276 104 L344 196 L298 196 L298 322 Z" fill="url(#wusool-teal)" />
+    <g fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M150 240 L212 268 L244 302" />
+      <path d="M310 300 L352 262 L386 238" />
+    </g>
+    <g fill="#ffffff">
+      <circle cx="212" cy="268" r="14" />
+      <circle cx="244" cy="302" r="13" />
+      <circle cx="310" cy="300" r="13" />
+    </g>
+    <g fill="#0E1B2D" stroke="url(#wusool-teal)" stroke-width="9">
+      <circle cx="150" cy="240" r="17" />
+      <circle cx="386" cy="238" r="17" />
+      <circle cx="324" cy="400" r="17" />
+    </g>
+  </g>
 </svg>
