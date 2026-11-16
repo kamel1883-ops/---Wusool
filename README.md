@@ -39,6 +39,7 @@
 | الرابط والمهمة | تحقق من الرابط (رفض loopback والشبكات الخاصة)، موافقة صريحة، وحالات `draft → queued → crawling → extracting → analyzing → awaiting_review → approved / changes_requested / failed / cancelled` |
 | الزحف | `SiteCrawlerProvider`: `mock` للتطوير، `fetch` زاحف حقيقي داخل الـ Worker (نطاق واحد، robots.txt، حدود صفحات/عمق، مهلة، سقف حجم، لا تجاوز حماية)، و`cloudflare` هيكل جاهز |
 | الذكاء الاصطناعي | `AIProvider`: `MockAIProvider` حتمي و`OpenAIProvider` متوافق مع OpenAI. الاختيار من الخادم، المفتاح في الأسرار فقط |
+| الحسابات والقنوات | OAuth رسمي لكل شركة (Meta: Pages + Instagram، Google: GA4/Search Console/GTM/Business Profile discovery)، رموز مشفّرة AES-GCM على الخادم، مصفوفة قدرات لكل منصة، مكتبة منشورات بنسخ واعتماد، طابور نشر بمهمة واحدة لكل هدف وBackoff، وسجل نشاط — التفاصيل في [`docs/social-channels.md`](docs/social-channels.md) |
 | اكتساب العملاء | ICP من التحليل المعتمد + عملاء بدليل ومصدر + درجات تأهيل + موافقة ومنع تواصل + حملات بفحص جاهزية + نتائج يدوية. الاكتشاف الآلي يحتاج مزوّد بيانات مرخّصًا (`LEAD_DATA_PROVIDER`, `LEAD_DATA_API_URL`, `LEAD_DATA_API_KEY`) وإلا يظهر «غير مفعّل» |
 | التقرير | ٢٣ قسمًا (بيانات الشركة، الرسالة، الرؤية، القيم، الخدمات، الجمهور، الشخصيات، القيمة المقترحة، القنوات، الحملات، الخارطة، المؤشرات، النواقص، الافتراضات) وكل معلومة بمصدرها `website/inference/missing` ودرجة ثقتها |
 | الاعتماد | نسخ غير قابلة للاستبدال، `submit-review`، `request-changes`، `approve` (مالك الشركة)، وتعديل المعتمد يعيده للمراجعة |

@@ -17,6 +17,7 @@
 | `content.approve` الاعتماد النهائي | ✅ | ✅ | — | — | — |
 | `leads.manage` العملاء المحتملون | ✅ | ✅ | — | — | — |
 | `reports.view` التقارير | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `social.manage` ربط الحسابات وفصلها | ✅ | ✅ | — | — | — |
 
 ملاحظات:
 - صلاحيات المحتوى وCRM والتقارير معرّفة الآن وتُفعّل مع وحداتها؛ كل مسار يستدعيها عند إنشائه.
@@ -83,6 +84,20 @@
 `POST /growth/campaigns/:id/preflight` · `POST /growth/campaigns/:id/launch` · `GET|POST /growth/metrics`
 
 كلها تتطلب `requireAuth` + `companyContext`؛ الكتابة تتطلب `leads.manage`.
+
+### الحسابات والقنوات (`/api/company/:companyId/social/*`)
+
+`GET /social` · `POST /social/oauth/start` · `GET /social/oauth/callback` (تحويل من المزوّد) ·
+`GET /social/oauth/pending?state=` · `POST /social/oauth/complete` ·
+`DELETE /social/connections/:id` · `POST /social/connections/:id/verify` ·
+`POST /social/preview` · `GET|POST /social/posts` · `GET|PUT /social/posts/:id` ·
+`POST /social/posts/:id/{submit,approve,schedule,publish,cancel,archive,duplicate}` ·
+`GET /social/jobs` · `POST /social/jobs/run` · `GET /social/events`
+
+- القراءة: `content.create` أو `reports.view`؛ الربط والفصل والتشغيل: `social.manage`؛
+  الاعتماد/الجدولة/النشر: `content.approve`.
+- مسار داخلي واحد خارج جلسة المتصفح: `POST /api/internal/social/tick` بترويسة
+  `x-wusool-jobs-secret` (يعيد ٥٠٣ عند غياب `JOBS_SECRET`).
 
 ### لوحة الإدارة (Super Admin)
 | METHOD | المسار | الوصف |

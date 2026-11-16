@@ -71,6 +71,9 @@ export function CompanyLayout() {
       ...(permissions.includes('leads.manage')
         ? [{ to: `${base}/growth`, label: t('nav.growth'), icon: 'target' as const }]
         : []),
+      ...(permissions.includes('social.manage') || permissions.includes('content.create')
+        ? [{ to: `${base}/social`, label: t('nav.social'), icon: 'share' as const }]
+        : []),
       { to: `${base}/company`, label: t('nav.company'), icon: 'building' },
       { to: `${base}/team`, label: t('nav.team'), icon: 'users' },
     ];
@@ -168,6 +171,7 @@ export function CompanyDashboardPage() {
   const modules: Array<{ key: string; phase: string; to?: string }> = [
     { key: 'siteAnalysis', phase: 'module.available', to: 'analyses' },
     { key: 'growth', phase: 'module.available', to: 'growth' },
+    { key: 'social', phase: 'module.available', to: 'social' },
     { key: 'strategy', phase: 'module.phase3' },
     { key: 'content', phase: 'module.phase3' },
     { key: 'design', phase: 'module.phase4' },

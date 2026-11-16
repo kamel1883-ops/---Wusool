@@ -4,12 +4,39 @@ import publicRoutes from './routes/public';
 import companyRoutes from './routes/company';
 import analysisRoutes from './routes/analysis';
 import growthRoutes from './routes/growth';
+import socialRoutes from './routes/social';
+import { runDueJobs } from './lib/social/publish';
 import adminRoutes from './routes/admin';
 import purchaseAdminRoutes from './routes/purchase-admin';
 
 const app = new Hono<AppEnv>();
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Scheduler entry point for due publishing jobs.
+ *
+ * Registered before the browser-oriented middleware because a scheduler is not
+ * a browser: it authenticates with a shared secret. When JOBS_SECRET is unset
+ * this deployment has no scheduler, and the endpoint says so (503) instead of
+ * pretending jobs run in the background.
+ */
+app.post('/api/internal/social/tick', async (c) => {
+  const secret = String(c.env.JOBS_SECRET ?? '');
+  if (!secret) {
+    return c.json({ error: { code: 'scheduler_not_configured' } }, 503);
+  }
+  if (c.req.header('x-wusool-jobs-secret') !== secret) {
+    return c.json({ error: { code: 'unauthorized' } }, 401);
+  }
+  const limit = Math.max(1, Math.min(20, Number(c.req.query('limit') ?? 10) || 10));
+  const results = await runDueJobs(c.env, { limit });
+  return c.json({
+    ran: results.length,
+    published: results.filter((item) => item.outcome.status === 'published').length,
+    failed: results.filter((item) => item.outcome.status === 'failed').length,
+  });
+});
 
 app.use('/api/*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');
@@ -43,6 +70,7 @@ app.route('/api', publicRoutes);
 app.route('/api/company', companyRoutes);
 app.route('/api/company', analysisRoutes);
 app.route('/api/company', growthRoutes);
+app.route('/api/company', socialRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin', purchaseAdminRoutes);
 

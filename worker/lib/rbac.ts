@@ -30,6 +30,7 @@ export const ROLE_PERMISSIONS: Record<CompanyRole, string[]> = {
     'content.review',
     'content.approve',
     'leads.manage',
+    'social.manage',
     'reports.view',
   ],
   marketing_manager: [
@@ -44,6 +45,7 @@ export const ROLE_PERMISSIONS: Record<CompanyRole, string[]> = {
     'content.review',
     'content.approve',
     'leads.manage',
+    'social.manage',
     'reports.view',
   ],
   // Writers and designers can read approved reports only; they cannot edit or

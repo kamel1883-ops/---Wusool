@@ -5,12 +5,14 @@
  */
 
 import { GROWTH_AR, GROWTH_EN } from './i18nGrowth';
+import { SOCIAL_AR, SOCIAL_EN } from './i18nSocial';
 
 export type Locale = 'ar' | 'en';
 
 type Dict = Record<string, string>;
 
 const ar: Dict = {
+  ...SOCIAL_AR,
   ...GROWTH_AR,
   'app.name': 'وصول',
   'app.tagline': 'منصة ذكاء التسويق للشركات',
@@ -723,6 +725,7 @@ const ar: Dict = {
   'module.content': 'المنشورات والمحتوى',
   'module.design': 'الصور والبوسترات',
   'module.growth': 'اكتساب العملاء',
+  'module.social': 'الحسابات والمنشورات',
   'module.messaging': 'البريد وWhatsApp',
   'module.reports': 'تقارير الأداء',
   'module.available': 'متاح الآن',
@@ -979,6 +982,7 @@ const ar: Dict = {
 };
 
 const en: Dict = {
+  ...SOCIAL_EN,
   ...GROWTH_EN,
   'app.name': 'Wusool',
   'app.tagline': 'Marketing intelligence for B2B teams',
@@ -1690,6 +1694,7 @@ const en: Dict = {
   'module.content': 'Posts & content',
   'module.design': 'Images & posters',
   'module.growth': 'Lead acquisition',
+  'module.social': 'Accounts & posts',
   'module.messaging': 'Email & WhatsApp',
   'module.reports': 'Performance reports',
   'module.available': 'Available now',

@@ -15,9 +15,18 @@ type IconName =
   | 'file'
   | 'shield'
   | 'layers'
-  | 'target';
+  | 'target'
+  | 'share';
 
 const ICONS: Record<IconName, ReactNode> = {
+  share: (
+    <>
+      <circle cx="6" cy="12" r="2.6" />
+      <circle cx="18" cy="6" r="2.6" />
+      <circle cx="18" cy="18" r="2.6" />
+      <path d="m8.4 10.8 7.2-3.6M8.4 13.2l7.2 3.6" />
+    </>
+  ),
   target: (
     <>
       <circle cx="12" cy="12" r="7.5" />

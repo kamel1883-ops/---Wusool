@@ -21,3 +21,20 @@ APP_ENV=development
 
 # First-admin allowlist for /api/setup (server env only, never commit a value):
 #   SETUP_ADMIN_EMAIL=
+
+# --- Social accounts and publishing (optional; the screens run without them) --
+# 32 random bytes, base64. Required before any account can be connected:
+#   SOCIAL_TOKEN_KEY=
+# Meta app (Pages + Instagram). The redirect URI must point at
+# /api/company/<companyId>/social/oauth/callback on this origin:
+#   META_APP_ID=
+#   META_APP_SECRET=
+#   META_REDIRECT_URI=
+# Google app (GA4, Search Console, Tag Manager, Business Profile discovery):
+#   GOOGLE_CLIENT_ID=
+#   GOOGLE_CLIENT_SECRET=
+#   GOOGLE_REDIRECT_URI=
+# Shared secret for the scheduler that drains due publish jobs:
+#   JOBS_SECRET=
+# After the provider approves advanced access, record it per platform:
+#   social.access.facebook_page=approved  (platform setting, not a secret)

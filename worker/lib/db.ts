@@ -38,6 +38,29 @@ export interface Env {
   META_IG_USER_ID?: string;
   LINKEDIN_TOKEN?: string;
   LINKEDIN_ORGANIZATION_ID?: string;
+
+  // --- Social accounts and publishing -------------------------------------
+  // 32-byte base64 key used to seal OAuth tokens with AES-GCM. Without it the
+  // connect endpoints refuse instead of storing a plaintext token.
+  SOCIAL_TOKEN_KEY?: string;
+  META_APP_ID?: string;
+  META_APP_SECRET?: string;
+  META_REDIRECT_URI?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT_URI?: string;
+  // Shared secret for the scheduler that drains due publish jobs.
+  JOBS_SECRET?: string;
+  // Provider base URLs. Only overridden in tests, where a local server stands
+  // in for the provider so the real publishing code is exercised end to end.
+  SOCIAL_GRAPH_BASE?: string;
+  SOCIAL_GRAPH_VERSION?: string;
+  SOCIAL_META_OAUTH_BASE?: string;
+  SOCIAL_META_TOKEN_BASE?: string;
+  SOCIAL_GOOGLE_OAUTH_BASE?: string;
+  SOCIAL_GOOGLE_TOKEN_BASE?: string;
+  SOCIAL_GOOGLE_API_BASE?: string;
+  SOCIAL_GOOGLE_ADMIN_BASE?: string;
 }
 
 export type Row = Record<string, any>;
