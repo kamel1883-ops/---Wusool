@@ -104,7 +104,12 @@ export async function settingsList(env: Env) {
       taglineEn: s['brand.tagline_en'] ?? '',
       primaryColor: s['brand.primary_color'] ?? '#17C6B4',
       inkColor: s['brand.ink_color'] ?? '#0E1B2D',
-      logoUrl: s['brand.logo_url'] ?? '/brand/logo.svg',
+      // The first schema seeded `/brand/logo.jpg`, a file that never shipped;
+      // map it to the bundled mark so old databases keep a visible logo.
+      logoUrl:
+        !s['brand.logo_url'] || s['brand.logo_url'] === '/brand/logo.jpg'
+          ? '/brand/logo.svg'
+          : s['brand.logo_url'],
       website: s['brand.website'] ?? '',
     },
     support: { email: s['support.email'] ?? '', whatsapp: s['support.whatsapp'] ?? '' },

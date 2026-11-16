@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Navigate, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError, useApi, type Me } from '../lib/api';
 import { useSession } from '../lib/session';
 import { errorKey, formatSAR } from '../lib/i18n';
+import { LEGAL } from '../lib/legal';
 import {
   Alert,
   Button,
@@ -40,28 +41,67 @@ export function landingRouteFor(me: Me) {
   return '/app';
 }
 
+/**
+ * Brand mark that never renders a broken image: if the URL configured in the
+ * admin settings points at a missing file, we fall back to the shipped mark.
+ */
+function BrandLogo({ className }: { className?: string }) {
+  const { me } = useSession();
+  const configured = me?.branding.logoUrl?.trim();
+  const [src, setSrc] = useState(configured || '/brand/logo.svg');
+
+  useEffect(() => {
+    setSrc(configured || '/brand/logo.svg');
+  }, [configured]);
+
+  return (
+    <img
+      src={src}
+      alt=""
+      className={className}
+      onError={() => {
+        if (src !== '/brand/logo.svg') setSrc('/brand/logo.svg');
+      }}
+    />
+  );
+}
+
+/** Scroll to `#anchor` links, including when arriving from another page. */
+function useHashScroll() {
+  const location = useLocation();
+  useEffect(() => {
+    if (!location.hash) return;
+    const id = decodeURIComponent(location.hash.slice(1));
+    const target = document.getElementById(id);
+    if (!target) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }, [location.hash, location.pathname]);
+}
+
 function PublicLayout({ children }: { children: ReactNode }) {
   const { me, locale, setLocale, t } = useSession();
   const brandName = me?.branding.nameAr ?? 'وصول';
   const brandLatin = me?.branding.nameEn ?? 'Wusool';
   const supportEmail = me?.support.email ?? '';
   const supportWhatsapp = me?.support.whatsapp ?? '';
+  useHashScroll();
 
   return (
     <div className="public">
       <header className="public-head">
         <Link to="/" className="public-brand">
-          <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" className="logo-tile" />
+          <BrandLogo className="logo-tile" />
           <div>
             <strong>{locale === 'ar' ? brandName : me?.branding.nameEn ?? 'Wusool'}</strong>
             <span>{locale === 'ar' ? me?.branding.taglineEn ?? 'Wusool' : brandName}</span>
           </div>
         </Link>
         <nav className="public-nav">
-          <a href="#journey">{t('lp.nav.journey')}</a>
-          <a href="#features">{t('lp.nav.features')}</a>
-          <a href="#plans">{t('lp.nav.plans')}</a>
-          <a href="#faq">{t('lp.nav.faq')}</a>
+          <Link to="/#journey">{t('lp.nav.journey')}</Link>
+          <Link to="/#features">{t('lp.nav.features')}</Link>
+          <Link to="/#plans">{t('lp.nav.plans')}</Link>
+          <Link to="/#faq">{t('lp.nav.faq')}</Link>
           <div className="lang-switch" role="group" aria-label="language">
             <button
               type="button"
@@ -88,7 +128,7 @@ function PublicLayout({ children }: { children: ReactNode }) {
         <div className="lp-footer-main">
           <div className="lp-footer-brand">
             <div className="lp-footer-logo">
-              <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" />
+              <BrandLogo />
               <div>
                 <strong>{brandName}</strong>
                 <span dir={locale === 'ar' ? 'ltr' : 'rtl'}>{brandLatin}</span>
@@ -99,26 +139,29 @@ function PublicLayout({ children }: { children: ReactNode }) {
 
           <div className="lp-footer-col">
             <h4>{t('lp.footer.product')}</h4>
-            <a href="#journey">{t('lp.nav.journey')}</a>
-            <a href="#features">{t('lp.nav.features')}</a>
-            <a href="#plans">{t('lp.nav.plans')}</a>
-            <a href="#analysis">{t('lp.analysis.title')}</a>
+            <Link to="/#journey">{t('lp.nav.journey')}</Link>
+            <Link to="/#features">{t('lp.nav.features')}</Link>
+            <Link to="/#plans">{t('lp.nav.plans')}</Link>
+            <Link to="/#faq">{t('lp.nav.faq')}</Link>
           </div>
 
           <div className="lp-footer-col">
             <h4>{t('lp.footer.legal')}</h4>
             <Link to="/terms">{t('landing.terms')}</Link>
             <Link to="/privacy">{t('landing.privacy')}</Link>
-            <Link to="/support">{t('landing.support')}</Link>
-            <Link to="/order">{t('lp.nav.plans')}</Link>
+            <Link to="/support">{t('legal.supportTitle')}</Link>
           </div>
 
           <div className="lp-footer-col">
             <h4>{t('lp.footer.contact')}</h4>
-            {/* Only real, admin-managed contact data is rendered — no placeholders. */}
-            {supportEmail ? <a href={`mailto:${supportEmail}`} dir="ltr">{supportEmail}</a> : null}
+            {/* Real, admin-managed contact data only — no placeholders. */}
+            <a href={`mailto:${supportEmail || 'info@jadara-hr.com'}`} dir="ltr">
+              {supportEmail || 'info@jadara-hr.com'}
+            </a>
             {supportWhatsapp ? <span dir="ltr">{supportWhatsapp}</span> : null}
-            {!supportEmail && !supportWhatsapp ? <Link to="/support">{t('landing.support')}</Link> : null}
+            <Link to="/order" className="lp-footer-cta">
+              {t('lp.hero.ctaPrimary')}
+            </Link>
             <span className="lp-footer-note">{t('lp.footer.payNote')}</span>
           </div>
         </div>
@@ -1127,12 +1170,12 @@ export function OrderPage() {
 }
 
 function AuthPanel({ children }: { children: ReactNode }) {
-  const { locale, me, t } = useSession();
+  const { locale, t } = useSession();
   return (
     <div className="auth-page">
       <aside className="auth-aside">
         <div className="auth-aside-brand">
-          <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" />
+          <BrandLogo />
           <div>
             <strong>{locale === 'ar' ? 'وصول' : 'Wusool'}</strong>
             <span>{t('app.tagline')}</span>
@@ -1146,6 +1189,9 @@ function AuthPanel({ children }: { children: ReactNode }) {
         <small>{t('landing.phaseNote')}</small>
       </aside>
       <main className="auth-main">
+        <Link to="/" className="auth-home">
+          <span aria-hidden="true">{locale === 'ar' ? '→' : '←'}</span> {t('legal.back')}
+        </Link>
         <div className="auth-card">{children}</div>
       </main>
     </div>
@@ -1611,68 +1657,79 @@ export function ChangePasswordPage() {
   );
 }
 
-export function TermsPage() {
-  const { t } = useSession();
+/**
+ * Legal and support documents share one renderer. Content lives in
+ * `lib/legal.ts` and is written against what the platform actually does.
+ */
+function LegalPage({ kind }: { kind: 'terms' | 'privacy' | 'support' }) {
+  const { me, locale, t } = useSession();
+  const doc = LEGAL[locale === 'en' ? 'en' : 'ar'][kind];
+  const email = me?.support.email?.trim() || 'info@jadara-hr.com';
+  const fill = (text: string) => text.replaceAll('{email}', email);
+
   return (
     <PublicLayout>
-      <section className="doc">
-        <h1>{t('terms.title')}</h1>
-        <Alert tone="warn">{t('terms.placeholder')}</Alert>
-        <p>{t('terms.body')}</p>
-      </section>
+      <article className="legal">
+        <Link to="/" className="legal-back">
+          <span aria-hidden="true">{locale === 'ar' ? '→' : '←'}</span> {t('legal.back')}
+        </Link>
+        <header className="legal-head">
+          <span className="legal-kicker">{doc.subtitle}</span>
+          <h1>{doc.title}</h1>
+          <p className="legal-updated">
+            {t('legal.updated')} {doc.updated}
+          </p>
+          <p className="legal-intro">{doc.intro}</p>
+        </header>
+        <div className="legal-body">
+          {doc.blocks.map((block) => (
+            <section key={block.heading}>
+              <h2>{block.heading}</h2>
+              {block.paragraphs?.map((paragraph) => (
+                <p key={paragraph}>{fill(paragraph)}</p>
+              ))}
+              {block.bullets ? (
+                <ul>
+                  {block.bullets.map((item) => (
+                    <li key={item}>{fill(item)}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ))}
+        </div>
+        <aside className="legal-contact">
+          <h2>{t('legal.contactTitle')}</h2>
+          <p>{t('legal.contactBody')}</p>
+          <div className="legal-contact-actions">
+            <a className="btn btn-primary" href={`mailto:${email}`} dir="ltr">
+              {email}
+            </a>
+            <Link className="btn btn-secondary" to="/support">
+              {t('legal.supportTitle')}
+            </Link>
+            {kind === 'support' && me?.user.platformRole === 'super_admin' ? (
+              <Link className="btn btn-secondary" to="/admin/settings">
+                {t('nav.platformSettings')}
+              </Link>
+            ) : null}
+          </div>
+        </aside>
+      </article>
     </PublicLayout>
   );
+}
+
+export function TermsPage() {
+  return <LegalPage kind="terms" />;
 }
 
 export function PrivacyPage() {
-  const { t } = useSession();
-  return (
-    <PublicLayout>
-      <section className="doc">
-        <h1>{t('privacy.title')}</h1>
-        <Alert tone="warn">{t('privacy.placeholder')}</Alert>
-        <p>{t('privacy.body')}</p>
-      </section>
-    </PublicLayout>
-  );
+  return <LegalPage kind="privacy" />;
 }
 
 export function SupportPage() {
-  const { me, t } = useSession();
-  return (
-    <PublicLayout>
-      <section className="doc">
-        <h1>{t('support.title')}</h1>
-        <p>{t('support.body')}</p>
-        <Card title={t('landing.support')}>
-          <dl className="detail-list">
-            <div>
-              <dt>{t('admin.supportEmail')}</dt>
-              <dd dir="ltr">
-                {me?.support.email || (
-                  <span className="muted">{t('support.emailMissing')}</span>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>{t('admin.supportWhatsapp')}</dt>
-              <dd dir="ltr">
-                {me?.support.whatsapp || (
-                  <span className="muted">{t('support.whatsappMissing')}</span>
-                )}
-              </dd>
-            </div>
-          </dl>
-          <p className="muted small">{t('support.adminNote')}</p>
-          {me?.user.platformRole === 'super_admin' ? (
-            <Link className="btn btn-secondary btn-sm" to="/admin/settings">
-              {t('nav.platformSettings')}
-            </Link>
-          ) : null}
-        </Card>
-      </section>
-    </PublicLayout>
-  );
+  return <LegalPage kind="support" />;
 }
 
 export function AccessDeniedPage() {

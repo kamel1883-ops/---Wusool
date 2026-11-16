@@ -136,7 +136,17 @@ export function AppShell({
       <div className="shell-scrim" onClick={() => setOpen(false)} aria-hidden />
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" className="logo-tile" />
+          <img
+            src={me?.branding.logoUrl || '/brand/logo.svg'}
+            alt=""
+            className="logo-tile"
+            onError={(event) => {
+              const img = event.currentTarget;
+              // A configured URL can go stale; keep the mark visible instead of
+              // showing a broken image.
+              if (img.getAttribute('src') !== '/brand/logo.svg') img.src = '/brand/logo.svg';
+            }}
+          />
           <div className="sidebar-brand-text">
             <strong>{brandName || 'وصول'}</strong>
             <span dir={locale === 'ar' ? 'ltr' : 'rtl'}>{brandAlt || 'Wusool'}</span>

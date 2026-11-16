@@ -650,6 +650,11 @@ const ar: Dict = {
   'landing.terms': 'الشروط والأحكام',
   'landing.privacy': 'الخصوصية',
   'landing.support': 'الدعم',
+  'legal.back': 'العودة إلى الصفحة الرئيسية',
+  'legal.updated': 'آخر تحديث:',
+  'legal.contactTitle': 'التواصل',
+  'legal.contactBody': 'لأي استفسار أو شكوى أو طلب متعلق ببياناتك، راسلنا مباشرة:',
+  'legal.supportTitle': 'الدعم والشكاوى',
 
   'terms.title': 'الشروط والأحكام',
   'terms.body':
@@ -1587,6 +1592,11 @@ const en: Dict = {
   'landing.terms': 'Terms',
   'landing.privacy': 'Privacy',
   'landing.support': 'Support',
+  'legal.back': 'Back to home',
+  'legal.updated': 'Last updated:',
+  'legal.contactTitle': 'Contact',
+  'legal.contactBody': 'For any question, complaint or data request, write to us directly:',
+  'legal.supportTitle': 'Support and complaints',
 
   'terms.title': 'Terms and conditions',
   'terms.body':
