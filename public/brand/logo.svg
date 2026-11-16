@@ -7,7 +7,9 @@
     </linearGradient>
   </defs>
   <rect width="96" height="96" rx="24" fill="url(#ws-mark)"/>
-  <path d="M24 63 L42 31 L52 47 L62 31 L78 63" fill="none" stroke="#FFFFFF" stroke-width="8.5"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="74" cy="27" r="5.5" fill="#FFFFFF" opacity="0.92"/>
+  <path d="M32 40 H64" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
+  <path d="M32 54 H52" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+  <path d="M32 68 H42" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M64 60 V34" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M53 45 L64 33 L75 45" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

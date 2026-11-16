@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError, useApi, type Me } from '../lib/api';
 import { useSession } from '../lib/session';
@@ -43,6 +43,9 @@ export function landingRouteFor(me: Me) {
 function PublicLayout({ children }: { children: ReactNode }) {
   const { me, locale, setLocale, t } = useSession();
   const brandName = me?.branding.nameAr ?? 'وصول';
+  const brandLatin = me?.branding.nameEn ?? 'Wusool';
+  const supportEmail = me?.support.email ?? '';
+  const supportWhatsapp = me?.support.whatsapp ?? '';
 
   return (
     <div className="public">
@@ -55,9 +58,10 @@ function PublicLayout({ children }: { children: ReactNode }) {
           </div>
         </Link>
         <nav className="public-nav">
-          <Link to="/support">{t('landing.support')}</Link>
-          <Link to="/terms">{t('landing.terms')}</Link>
-          <Link to="/privacy">{t('landing.privacy')}</Link>
+          <a href="#journey">{t('lp.nav.journey')}</a>
+          <a href="#features">{t('lp.nav.features')}</a>
+          <a href="#plans">{t('lp.nav.plans')}</a>
+          <a href="#faq">{t('lp.nav.faq')}</a>
           <div className="lang-switch" role="group" aria-label="language">
             <button
               type="button"
@@ -80,121 +84,765 @@ function PublicLayout({ children }: { children: ReactNode }) {
         </nav>
       </header>
       {children}
-      <footer className="public-foot">
-        <span>
-          © {new Date().getFullYear()} {brandName} · {t('landing.footerRights')}
-        </span>
-        <span className="public-foot-links">
-          <Link to="/terms">{t('landing.terms')}</Link>
-          <Link to="/privacy">{t('landing.privacy')}</Link>
-          <Link to="/support">{t('landing.support')}</Link>
-        </span>
+      <footer className="lp-footer">
+        <div className="lp-footer-main">
+          <div className="lp-footer-brand">
+            <div className="lp-footer-logo">
+              <img src={me?.branding.logoUrl ?? '/brand/logo.svg'} alt="" />
+              <div>
+                <strong>{brandName}</strong>
+                <span dir={locale === 'ar' ? 'ltr' : 'rtl'}>{brandLatin}</span>
+              </div>
+            </div>
+            <p>{t('lp.footer.tagline')}</p>
+          </div>
+
+          <div className="lp-footer-col">
+            <h4>{t('lp.footer.product')}</h4>
+            <a href="#journey">{t('lp.nav.journey')}</a>
+            <a href="#features">{t('lp.nav.features')}</a>
+            <a href="#plans">{t('lp.nav.plans')}</a>
+            <a href="#analysis">{t('lp.analysis.title')}</a>
+          </div>
+
+          <div className="lp-footer-col">
+            <h4>{t('lp.footer.legal')}</h4>
+            <Link to="/terms">{t('landing.terms')}</Link>
+            <Link to="/privacy">{t('landing.privacy')}</Link>
+            <Link to="/support">{t('landing.support')}</Link>
+            <Link to="/order">{t('lp.nav.plans')}</Link>
+          </div>
+
+          <div className="lp-footer-col">
+            <h4>{t('lp.footer.contact')}</h4>
+            {/* Only real, admin-managed contact data is rendered — no placeholders. */}
+            {supportEmail ? <a href={`mailto:${supportEmail}`} dir="ltr">{supportEmail}</a> : null}
+            {supportWhatsapp ? <span dir="ltr">{supportWhatsapp}</span> : null}
+            {!supportEmail && !supportWhatsapp ? <Link to="/support">{t('landing.support')}</Link> : null}
+            <span className="lp-footer-note">{t('lp.footer.payNote')}</span>
+          </div>
+        </div>
+        <div className="lp-footer-bottom">
+          <span>
+            © {new Date().getFullYear()} {brandName} · {t('lp.footer.rights')}
+          </span>
+          <span className="lp-footer-bottom-links">
+            <Link to="/login">{t('auth.signIn')}</Link>
+            <Link to="/order">{t('lp.hero.ctaPrimary')}</Link>
+          </span>
+        </div>
       </footer>
     </div>
   );
 }
 
-export function LandingPage() {
-  const { me, t } = useSession();
-  if (me) return <Navigate to={landingRouteFor(me)} replace />;
+/* ==========================================================================
+   Landing page (B2B SaaS)
+   The journey below mirrors what the platform actually does, and each stage
+   carries its real delivery status instead of presenting the roadmap as done.
+   ========================================================================== */
 
-  const features: Array<[string, string]> = [
-    ['module.siteAnalysis', 'landing2.feat1'],
-    ['module.strategy', 'landing2.feat2'],
-    ['module.content', 'landing2.feat3'],
-    ['module.crm', 'landing2.feat4'],
-    ['landing2.trust3t', 'landing2.feat5'],
-  ];
+type StageStatus = 'live' | 'partial' | 'planned';
+type GlyphName =
+  | 'link'
+  | 'scan'
+  | 'strategy'
+  | 'audience'
+  | 'campaign'
+  | 'design'
+  | 'check'
+  | 'follow'
+  | 'chart';
 
-  const flow = ['landing2.how1', 'landing2.how2', 'landing2.how3', 'landing2.how4'];
+const JOURNEY_STAGES: Array<{ n: number; icon: GlyphName; status: StageStatus; anchor: string }> = [
+  { n: 1, icon: 'link', status: 'live', anchor: '#analysis' },
+  { n: 2, icon: 'scan', status: 'live', anchor: '#analysis' },
+  { n: 3, icon: 'strategy', status: 'partial', anchor: '#analysis' },
+  { n: 4, icon: 'audience', status: 'partial', anchor: '#analysis' },
+  { n: 5, icon: 'campaign', status: 'partial', anchor: '#content' },
+  { n: 6, icon: 'design', status: 'planned', anchor: '#content' },
+  { n: 7, icon: 'check', status: 'live', anchor: '#approval' },
+  { n: 8, icon: 'follow', status: 'planned', anchor: '#leads' },
+  { n: 9, icon: 'chart', status: 'planned', anchor: '#reports' },
+];
 
-  const faqs: Array<[string, string]> = [
-    ['landing2.faq1q', 'landing2.faq1a'],
-    ['landing2.faq2q', 'landing2.faq2a'],
-    ['landing2.faq3q', 'landing2.faq3a'],
-    ['landing2.faq4q', 'landing2.faq4a'],
-  ];
+const STATUS_LABEL: Record<StageStatus, string> = {
+  live: 'lp.journey.statusLive',
+  partial: 'lp.journey.statusPartial',
+  planned: 'lp.journey.statusPlanned',
+};
+
+function Glyph({ name, size = 22 }: { name: GlyphName; size?: number }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  switch (name) {
+    case 'link':
+      return (
+        <svg {...common}>
+          <path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7l-1 1" />
+          <path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1-1" />
+        </svg>
+      );
+    case 'scan':
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="6" />
+          <path d="M20 20l-4.6-4.6" />
+          <path d="M8.6 11h4.8" />
+        </svg>
+      );
+    case 'strategy':
+      return (
+        <svg {...common}>
+          <path d="M4 18l5-6 4 3 7-9" />
+          <circle cx="20" cy="6" r="1.6" />
+          <path d="M4 21h16" />
+        </svg>
+      );
+    case 'audience':
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="8" r="3" />
+          <path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" />
+          <circle cx="17" cy="9" r="2.4" />
+          <path d="M14.6 20c0-2.5 1.6-4.2 3.4-4.2s3.4 1.7 3.4 4.2" />
+        </svg>
+      );
+    case 'campaign':
+      return (
+        <svg {...common}>
+          <path d="M4 10v4l3 1 9 4V5L7 9H4z" />
+          <path d="M7 15v4" />
+          <path d="M19 9.5v5" />
+        </svg>
+      );
+    case 'design':
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4.5" width="17" height="14" rx="2.5" />
+          <circle cx="9" cy="10" r="1.6" />
+          <path d="M5 16l4.5-4 3.5 3 3-3.4 4 4.4" />
+        </svg>
+      );
+    case 'check':
+      return (
+        <svg {...common}>
+          <path d="M12 3l7 3v6c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6l7-3z" />
+          <path d="M8.7 12l2.4 2.4 4.3-4.3" />
+        </svg>
+      );
+    case 'follow':
+      return (
+        <svg {...common}>
+          <path d="M20 15a2 2 0 0 1-2 2H8l-4 3V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" />
+          <path d="M8 9h8M8 13h5" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <path d="M4 20V11" />
+          <path d="M10 20V5" />
+          <path d="M16 20v-6" />
+          <path d="M22 20H2" />
+        </svg>
+      );
+  }
+}
+
+/** Quiet scroll reveal; the animation is disabled by CSS for reduced motion. */
+function Reveal({
+  children,
+  delay = 0,
+  className,
+}: {
+  children: ReactNode;
+  delay?: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setShown(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShown(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -6% 0px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <PublicLayout>
-      <section className="hero hero-b2b">
-        <div className="hero-text">
-          <span className="pill">{t('landing2.badge')}</span>
-          <h1>{t('landing2.heroTitle')}</h1>
-          <p className="hero-lead">{t('landing2.heroLead')}</p>
-          <div className="hero-actions">
-            <Link to="/order" className="btn btn-primary">
-              {t('landing2.ctaOrder')}
-            </Link>
-            <Link to="/login" className="btn btn-secondary">
-              {t('landing2.ctaLogin')}
-            </Link>
+    <div
+      ref={ref}
+      className={`reveal${shown ? ' reveal-in' : ''}${className ? ` ${className}` : ''}`}
+      style={delay ? { animationDelay: `${delay}ms` } : undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduced(query.matches);
+    const onChange = () => setReduced(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  return reduced;
+}
+
+function StatusChip({ status, t }: { status: StageStatus; t: (key: string) => string }) {
+  return <span className={`lp-status lp-status-${status}`}>{t(STATUS_LABEL[status])}</span>;
+}
+
+function SectionHead({ eyebrow, title, sub }: { eyebrow?: string; title: string; sub?: string }) {
+  return (
+    <header className="lp-head">
+      {eyebrow ? <span className="lp-eyebrow">{eyebrow}</span> : null}
+      <h2>{title}</h2>
+      {sub ? <p>{sub}</p> : null}
+    </header>
+  );
+}
+
+function Hero() {
+  const { t } = useSession();
+  return (
+    <section className="lp-hero">
+      <div className="lp-hero-copy">
+        <span className="lp-badge">{t('lp.hero.badge')}</span>
+        <h1>
+          {t('lp.hero.titleA')} <span className="lp-gradient">{t('lp.hero.titleB')}</span>
+        </h1>
+        <p className="lp-lead">{t('lp.hero.lead')}</p>
+        <div className="lp-actions">
+          <Link to="/order" className="btn btn-primary btn-lg">
+            {t('lp.hero.ctaPrimary')}
+          </Link>
+          <a href="#journey" className="btn btn-secondary btn-lg">
+            {t('lp.hero.ctaSecondary')}
+          </a>
+        </div>
+        <p className="lp-cta-note">{t('lp.hero.ctaNote')}</p>
+        <dl className="lp-stats">
+          <div>
+            <dt>{t('lp.stats.sections')}</dt>
+            <dd>{t('lp.stats.sectionsLabel')}</dd>
           </div>
-          <ul className="trust-list">
+          <div>
+            <dt>{t('lp.stats.sources')}</dt>
+            <dd>{t('lp.stats.sourcesLabel')}</dd>
+          </div>
+          <div>
+            <dt>{t('lp.stats.states')}</dt>
+            <dd>{t('lp.stats.statesLabel')}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div className="lp-hero-visual" aria-label={t('lp.hero.demo')} role="img">
+        <span className="lp-mock-badge">{t('lp.hero.demo')}</span>
+        <div className="lp-mock">
+          <div className="lp-mock-head">
+            <img src="/brand/logo.svg" alt="" />
+            <div>
+              <strong>{t('lp.hero.panelTitle')}</strong>
+              <span>{t('lp.hero.panelMeta')}</span>
+            </div>
+          </div>
+          <div className="lp-chips">
+            <span className="lp-chip lp-chip-site">{t('lp.hero.chipWebsite')}</span>
+            <span className="lp-chip lp-chip-inf">{t('lp.hero.chipInference')}</span>
+            <span className="lp-chip lp-chip-sug">{t('lp.hero.chipSuggestion')}</span>
+            <span className="lp-chip lp-chip-miss">{t('lp.hero.chipMissing')}</span>
+          </div>
+          <ul className="lp-mock-lines">
             <li>
-              <strong>{t('landing2.trust1t')}</strong>
-              <span>{t('landing2.trust1x')}</span>
+              <span className="lp-dot lp-dot-site" />
+              {t('lp.hero.row1')}
             </li>
             <li>
-              <strong>{t('landing2.trust2t')}</strong>
-              <span>{t('landing2.trust2x')}</span>
+              <span className="lp-dot lp-dot-inf" />
+              {t('lp.hero.row2')}
             </li>
             <li>
-              <strong>{t('landing2.trust3t')}</strong>
-              <span>{t('landing2.trust3x')}</span>
+              <span className="lp-dot lp-dot-sug" />
+              {t('lp.hero.row3')}
+            </li>
+            <li className="lp-mock-missing">
+              <span className="lp-dot lp-dot-miss" />
+              <span className="lp-skeleton" />
             </li>
           </ul>
+          <p className="lp-mock-foot">{t('lp.hero.panelFoot')}</p>
         </div>
-        <aside className="hero-visual">
-          <BrandImg src="/brand/hero-team.svg" alt={t('landing2.imgAlt')} className="hero-img-main" />
-          <div className="hero-visual-side">
-            <BrandImg src="/brand/hero-office.svg" alt={t('landing2.imgAlt')} className="hero-img-side" />
-            <BrandImg src="/brand/hero-market.svg" alt={t('landing2.imgAlt')} className="hero-img-side" />
+      </div>
+    </section>
+  );
+}
+
+function MotionPreview() {
+  const { t } = useSession();
+  const reduced = usePrefersReducedMotion();
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    if (reduced) setPlaying(false);
+  }, [reduced]);
+
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setInterval(() => {
+      setStep((current) => (current + 1) % JOURNEY_STAGES.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [playing]);
+
+  const stage = JOURNEY_STAGES[step];
+
+  return (
+    <section className="lp-band" id="demo">
+      <div className="lp-inner">
+        <SectionHead eyebrow={t('lp.demo.eyebrow')} title={t('lp.demo.title')} sub={t('lp.demo.sub')} />
+        <Reveal className="lp-demo">
+          <div className="lp-demo-rail" aria-hidden>
+            <span className="lp-demo-track" />
+            <span
+              className="lp-demo-progress"
+              style={{ width: `${((step + 1) / JOURNEY_STAGES.length) * 100}%` }}
+            />
+            {JOURNEY_STAGES.map((item, index) => (
+              <button
+                key={item.n}
+                type="button"
+                className={index <= step ? 'lp-demo-node is-done' : 'lp-demo-node'}
+                onClick={() => {
+                  setStep(index);
+                  setPlaying(false);
+                }}
+                aria-label={t(`lp.j${item.n}.name`)}
+              >
+                <Glyph name={item.icon} size={18} />
+              </button>
+            ))}
           </div>
-        </aside>
-      </section>
 
-      <section className="section" id="plans">
-        <h2 className="section-title">{t('landing2.plansTitle')}</h2>
-        <p className="section-sub">{t('landing2.plansSub')}</p>
-        <PlansSection />
-      </section>
+          <div className="lp-demo-stage">
+            <div className="lp-demo-icon">
+              <Glyph name={stage.icon} size={26} />
+            </div>
+            <div>
+              <strong>{t(`lp.j${stage.n}.name`)}</strong>
+              <p>{t(`lp.j${stage.n}.desc`)}</p>
+            </div>
+            <StatusChip status={stage.status} t={t} />
+          </div>
 
-      <section className="section">
-        <h2 className="section-title">{t('landing2.featuresTitle')}</h2>
-        <div className="feature-grid">
-          {features.map(([title, text]) => (
-            <article className="feature" key={title}>
+          <div className="lp-demo-foot">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPlaying(!playing)}>
+              {playing ? t('lp.demo.pause') : t('lp.demo.play')}
+            </button>
+            <span className="lp-muted">{t('lp.demo.note')}</span>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function JourneyMap() {
+  const { t } = useSession();
+  const [active, setActive] = useState(1);
+  const stage = JOURNEY_STAGES.find((item) => item.n === active) ?? JOURNEY_STAGES[0];
+
+  return (
+    <section className="lp-inner lp-section" id="journey">
+      <SectionHead eyebrow={t('lp.journey.eyebrow')} title={t('lp.journey.title')} sub={t('lp.journey.sub')} />
+
+      <Reveal>
+        <div className="lp-journey">
+          <div className="lp-journey-rail">
+            <span className="lp-journey-line" aria-hidden />
+            {JOURNEY_STAGES.map((item) => {
+              const selected = item.n === active;
+              return (
+                <button
+                  key={item.n}
+                  type="button"
+                  className={`lp-journey-node lp-journey-${item.status}${selected ? ' is-active' : ''}`}
+                  onClick={() => setActive(item.n)}
+                  aria-pressed={selected}
+                >
+                  <span className="lp-journey-index">{item.n}</span>
+                  <span className="lp-journey-icon">
+                    <Glyph name={item.icon} size={20} />
+                  </span>
+                  <span className="lp-journey-name">{t(`lp.j${item.n}.name`)}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="lp-journey-detail">
+            <div className="lp-journey-detail-head">
+              <span className="lp-journey-icon lg">
+                <Glyph name={stage.icon} size={24} />
+              </span>
+              <div>
+                <h3>{t(`lp.j${stage.n}.name`)}</h3>
+                <StatusChip status={stage.status} t={t} />
+              </div>
+            </div>
+            <p>{t(`lp.j${stage.n}.desc`)}</p>
+            <a className="lp-link" href={stage.anchor}>
+              {t('lp.journey.more')}
+              <span aria-hidden> ←</span>
+            </a>
+          </div>
+        </div>
+        <p className="lp-note">{t('lp.journey.note')}</p>
+      </Reveal>
+    </section>
+  );
+}
+
+function ProblemSection() {
+  const { t } = useSession();
+  const items: Array<[string, string]> = [
+    ['lp.problem.1t', 'lp.problem.1x'],
+    ['lp.problem.2t', 'lp.problem.2x'],
+    ['lp.problem.3t', 'lp.problem.3x'],
+    ['lp.problem.4t', 'lp.problem.4x'],
+  ];
+  return (
+    <section className="lp-band" id="problem">
+      <div className="lp-inner lp-section">
+        <SectionHead title={t('lp.problem.title')} sub={t('lp.problem.sub')} />
+        <div className="lp-grid-4">
+          {items.map(([title, text], index) => (
+            <Reveal key={title} delay={index * 60}>
+              <article className="lp-card lp-problem-card">
+                <span className="lp-problem-mark" aria-hidden />
+                <h3>{t(title)}</h3>
+                <p>{t(text)}</p>
+              </article>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HowItWorks() {
+  const { t } = useSession();
+  const steps = [1, 2, 3, 4];
+  return (
+    <section className="lp-inner lp-section" id="how">
+      <SectionHead title={t('lp.how.title')} sub={t('lp.how.sub')} />
+      <ol className="lp-steps">
+        {steps.map((step, index) => (
+          <Reveal key={step} delay={index * 70}>
+            <li className="lp-step">
+              <span className="lp-step-index">{step}</span>
+              <div>
+                <h3>{t(`lp.how.${step}t`)}</h3>
+                <p>{t(`lp.how.${step}x`)}</p>
+              </div>
+            </li>
+          </Reveal>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function FeatureSection() {
+  const { t } = useSession();
+  const items: Array<[string, string]> = [
+    ['lp.features.1t', 'lp.features.1x'],
+    ['lp.features.2t', 'lp.features.2x'],
+    ['lp.features.3t', 'lp.features.3x'],
+    ['lp.features.4t', 'lp.features.4x'],
+    ['lp.features.5t', 'lp.features.5x'],
+    ['lp.features.6t', 'lp.features.6x'],
+  ];
+  return (
+    <section className="lp-inner lp-section" id="features">
+      <SectionHead title={t('lp.features.title')} sub={t('lp.features.sub')} />
+      <div className="lp-grid-3">
+        {items.map(([title, text], index) => (
+          <Reveal key={title} delay={index * 50}>
+            <article className="lp-card lp-feature">
+              <span className="lp-feature-icon">
+                <Glyph
+                  name={(['scan', 'strategy', 'check', 'design', 'audience', 'follow'] as GlyphName[])[index]}
+                  size={20}
+                />
+              </span>
               <h3>{t(title)}</h3>
               <p>{t(text)}</p>
             </article>
-          ))}
-        </div>
-      </section>
+          </Reveal>
+        ))}
+      </div>
+    </section>
+  );
+}
 
-      <section className="section">
-        <h2 className="section-title">{t('landing2.howTitle')}</h2>
-        <ol className="flow">
-          {flow.map((key, index) => (
-            <li key={key}>
-              <span className="flow-index">{index + 1}</span>
-              <p>{t(key)}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section className="section">
-        <h2 className="section-title">{t('landing2.faqTitle')}</h2>
-        <div className="faq-list">
-          {faqs.map(([question, answer]) => (
-            <details className="faq" key={question}>
-              <summary>{t(question)}</summary>
-              <p>{t(answer)}</p>
-            </details>
-          ))}
+function SplitFeature({
+  id,
+  image,
+  title,
+  sub,
+  bullets,
+  status,
+  note,
+  cta,
+}: {
+  id: string;
+  image: string;
+  title: string;
+  sub: string;
+  bullets: string[];
+  status?: StageStatus;
+  note?: string;
+  cta?: string;
+}) {
+  const { t } = useSession();
+  return (
+    <section className="lp-inner lp-section" id={id}>
+      <Reveal>
+        <div className="lp-split">
+          <div className="lp-split-media">
+            <BrandImg src={image} alt={title} className="lp-figure-img" />
+          </div>
+          <div className="lp-split-copy">
+            {status ? <StatusChip status={status} t={t} /> : null}
+            <h2>{title}</h2>
+            <p className="lp-sub">{sub}</p>
+            <ul className="lp-bullets">
+              {bullets.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            {note ? <p className="lp-note">{note}</p> : null}
+            {cta ? (
+              <Link to="/order" className="btn btn-primary">
+                {cta}
+              </Link>
+            ) : null}
+          </div>
         </div>
-      </section>
+      </Reveal>
+    </section>
+  );
+}
+
+function AnalysisSection() {
+  const { t } = useSession();
+  return (
+    <SplitFeature
+      id="analysis"
+      image="/brand/scene-analysis.svg"
+      title={t('lp.analysis.title')}
+      sub={t('lp.analysis.sub')}
+      bullets={[t('lp.analysis.b1'), t('lp.analysis.b2'), t('lp.analysis.b3')]}
+      status="live"
+      cta={t('lp.analysis.cta')}
+    />
+  );
+}
+
+function ContentSection() {
+  const { t } = useSession();
+  return (
+    <SplitFeature
+      id="content"
+      image="/brand/scene-content.svg"
+      title={t('lp.content.title')}
+      sub={t('lp.content.sub')}
+      bullets={[t('lp.content.b1'), t('lp.content.b2'), t('lp.content.b3')]}
+      status="planned"
+      note={t('lp.content.note')}
+    />
+  );
+}
+
+function LeadsSection() {
+  const { t } = useSession();
+  return (
+    <SplitFeature
+      id="leads"
+      image="/brand/scene-leads.svg"
+      title={t('lp.leads.title')}
+      sub={t('lp.leads.sub')}
+      bullets={[t('lp.leads.b1'), t('lp.leads.b2'), t('lp.leads.b3')]}
+      status="planned"
+      note={t('lp.leads.note')}
+    />
+  );
+}
+
+function ApprovalSection() {
+  const { t } = useSession();
+  return (
+    <SplitFeature
+      id="approval"
+      image="/brand/scene-flow.svg"
+      title={t('lp.approval.title')}
+      sub={t('lp.approval.sub')}
+      bullets={[t('lp.approval.b1'), t('lp.approval.b2'), t('lp.approval.b3')]}
+      status="live"
+    />
+  );
+}
+
+function ReportsSection() {
+  const { t } = useSession();
+  return (
+    <SplitFeature
+      id="reports"
+      image="/brand/scene-reports.svg"
+      title={t('lp.reports.title')}
+      sub={t('lp.reports.sub')}
+      bullets={[t('lp.reports.b1'), t('lp.reports.b2'), t('lp.reports.b3')]}
+      status="partial"
+      note={t('lp.reports.note')}
+    />
+  );
+}
+
+function PlansBlock() {
+  const { t } = useSession();
+  return (
+    <section className="lp-band" id="plans">
+      <div className="lp-inner lp-section">
+        <SectionHead title={t('lp.plans.title')} sub={t('lp.plans.sub')} />
+        <PlansSection />
+        <p className="lp-note">{t('lp.plans.note')}</p>
+      </div>
+    </section>
+  );
+}
+
+function TrustSection() {
+  const { t } = useSession();
+  const items: Array<[string, string]> = [
+    ['lp.trust.1t', 'lp.trust.1x'],
+    ['lp.trust.2t', 'lp.trust.2x'],
+    ['lp.trust.3t', 'lp.trust.3x'],
+    ['lp.trust.4t', 'lp.trust.4x'],
+  ];
+  return (
+    <section className="lp-inner lp-section" id="trust">
+      <SectionHead title={t('lp.trust.title')} sub={t('lp.trust.sub')} />
+      <div className="lp-grid-4">
+        {items.map(([title, text], index) => (
+          <Reveal key={title} delay={index * 50}>
+            <article className="lp-card lp-trust-card">
+              <span className="lp-feature-icon">
+                <Glyph name="check" size={20} />
+              </span>
+              <h3>{t(title)}</h3>
+              <p>{t(text)}</p>
+            </article>
+          </Reveal>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FaqSection() {
+  const { t } = useSession();
+  const faqs = [1, 2, 3, 4, 5, 6];
+  return (
+    <section className="lp-inner lp-section" id="faq">
+      <SectionHead title={t('lp.faq.title')} />
+      <div className="lp-faq">
+        {faqs.map((n) => (
+          <details className="faq" key={n}>
+            <summary>{t(`lp.faq.${n}q`)}</summary>
+            <p>{t(`lp.faq.${n}a`)}</p>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FinalCta() {
+  const { t } = useSession();
+  return (
+    <section className="lp-inner lp-section">
+      <Reveal>
+        <div className="lp-final">
+          <div>
+            <h2>{t('lp.cta.title')}</h2>
+            <p>{t('lp.cta.sub')}</p>
+          </div>
+          <div className="lp-actions">
+            <Link to="/order" className="btn btn-primary btn-lg">
+              {t('lp.cta.primary')}
+            </Link>
+            <Link to="/login" className="btn btn-secondary btn-lg">
+              {t('lp.cta.secondary')}
+            </Link>
+          </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
+export function LandingPage() {
+  const { me } = useSession();
+  if (me) return <Navigate to={landingRouteFor(me)} replace />;
+
+  return (
+    <PublicLayout>
+      <Hero />
+      <MotionPreview />
+      <JourneyMap />
+      <ProblemSection />
+      <HowItWorks />
+      <FeatureSection />
+      <AnalysisSection />
+      <ContentSection />
+      <LeadsSection />
+      <ApprovalSection />
+      <ReportsSection />
+      <PlansBlock />
+      <TrustSection />
+      <FaqSection />
+      <FinalCta />
     </PublicLayout>
   );
 }
@@ -205,6 +853,8 @@ type PublicPlan = {
   nameEn: string;
   priceSar: number;
   maxUsers: number | null;
+  monthlyAnalyses?: number | null;
+  maxConcurrent?: number | null;
   featuresAr: string[];
   featuresEn: string[];
   prices: Array<{ months: number; price: number }>;
@@ -264,6 +914,21 @@ function PlansSection() {
                 {price ? formatSAR(price.price, locale) : '—'}
                 <small> / {t(`landing2.m${months}`)}</small>
               </p>
+              {/* Limits come from the plan row, the same values the API enforces. */}
+              <ul className="lp-plan-limits">
+                <li>
+                  <strong>{plan.maxUsers ?? '∞'}</strong>
+                  <span>{t('lp.plan.seats')}</span>
+                </li>
+                <li>
+                  <strong>{plan.monthlyAnalyses ?? '∞'}</strong>
+                  <span>{t('lp.plan.analyses')}</span>
+                </li>
+                <li>
+                  <strong>{plan.maxConcurrent ?? '—'}</strong>
+                  <span>{t('lp.plan.concurrent')}</span>
+                </li>
+              </ul>
               {features.length ? (
                 <ul className="price-features">
                   {features.slice(0, 6).map((feature) => (
