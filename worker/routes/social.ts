@@ -60,6 +60,9 @@ import {
   recomputePostStatus,
   runDueJobs,
 } from '../lib/social/publish';
+import { buildAiDraft, buildLocalDraft, generateStudioImage } from '../lib/social/studio';
+import { isPosterSize, isPosterTemplate, POSTER_SIZES } from '../lib/posters';
+import { ProviderError } from '../lib/ai/types';
 
 const app = new Hono<AppEnv>();
 
@@ -929,6 +932,256 @@ app.post('/:companyId/social/preview', async (c) => {
       };
     }),
   });
+});
+
+// ---------------------------------------------------------------------------
+// Post studio — idea in, caption + image out.
+//
+// The client writes one idea ("two Saudi men holding a phone, the post says
+// …"); the server writes the caption and the poster copy, renders the poster
+// as a draft, and optionally asks the image gateway for a raster image. The
+// client then approves, regenerates with feedback, or saves — saving stores a
+// draft in the post library the client can return to and copy from anytime.
+// Nothing publishes from here: approval and publishing stay on their own
+// server-checked paths.
+// ---------------------------------------------------------------------------
+
+/** Facts from the latest approved analysis — website/inference values only. */
+async function studioContext(env: any, companyId: string): Promise<string[]> {
+  const row = await first<any>(
+    env,
+    `SELECT r.result_json FROM analysis_results r
+       JOIN site_analyses a ON a.id = r.analysis_id
+      WHERE a.company_id = ? AND a.status = 'approved' AND r.version = a.approved_version
+      ORDER BY a.created_at DESC LIMIT 1`,
+    companyId
+  );
+  if (!row) return [];
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(row.result_json);
+  } catch {
+    return [];
+  }
+  const usable = (field: any) =>
+    field && typeof field.value === 'string' && field.value.trim() && field.source !== 'missing' && field.source !== 'suggestion'
+      ? field.value.trim()
+      : '';
+  const out: string[] = [];
+  const industry = usable(parsed?.company_profile?.industry);
+  const summary = usable(parsed?.company_profile?.summary);
+  if (summary) out.push(summary);
+  if (industry) out.push(industry);
+  const services = Array.isArray(parsed?.products_and_services)
+    ? parsed.products_and_services.map(usable).filter(Boolean).slice(0, 4)
+    : [];
+  if (services.length) out.push(`Services: ${services.join('، ')}`);
+  return out.slice(0, 4);
+}
+
+app.post('/:companyId/social/studio/generate', async (c) => {
+  const company = c.get('company');
+  const actor = c.get('user');
+  if (!can(c.get('role'), CREATE)) return apiError(c, 403, 'forbidden');
+
+  const body = await readJson<Record<string, unknown>>(c);
+  const idea = str(body.idea, 2000);
+  if (idea.length < 3) return apiError(c, 422, 'studio_idea_required');
+  const language = body.language === 'en' ? 'en' : 'ar';
+  const sizeKey = str(body.sizeKey, 40) || 'instagram_business';
+  if (!isPosterSize(sizeKey)) return apiError(c, 422, 'poster_size_invalid');
+  const template = str(body.template, 20) || 'bold';
+  if (!isPosterTemplate(template)) return apiError(c, 422, 'poster_template_invalid');
+  const brandColor = str(body.brandColor, 7) || '#0f766e';
+  if (!/^#[0-9a-fA-F]{6}$/.test(brandColor)) return apiError(c, 422, 'color_invalid');
+  const variant = Math.max(0, Math.min(50, Math.floor(Number(body.variant ?? 0) || 0)));
+  const feedback = str(body.feedback, 1000);
+
+  const previousRaw = body.previous && typeof body.previous === 'object' ? (body.previous as any) : null;
+  const previous = previousRaw
+    ? {
+        headline: str(previousRaw.headline, 240),
+        caption: str(previousRaw.caption ?? previousRaw.captionAr ?? previousRaw.captionEn, 2000),
+      }
+    : null;
+
+  const input = {
+    idea,
+    feedback,
+    language: language as 'ar' | 'en',
+    companyName: String(company.name ?? ''),
+    context: await studioContext(c.env, company.id),
+    previous,
+    variant,
+  };
+
+  let draft;
+  try {
+    draft = (await buildAiDraft(c.env as any, input)) ?? buildLocalDraft(input);
+  } catch (error) {
+    const code = error instanceof ProviderError ? error.code : 'ai_provider_failed';
+    return apiError(c, 502, code);
+  }
+
+  // The studio image is the server-rendered poster draft: approving it makes
+  // its public URL usable as the saved post's media, exactly like a poster
+  // created by hand from the posters tab.
+  const size = POSTER_SIZES[sizeKey];
+  const posterId = newId('pstr');
+  const timestamp = nowIso();
+  await run(
+    c.env,
+    `INSERT INTO poster_drafts (id, company_id, title, headline, subhead, cta, template, size_key,
+       width, height, brand_color, language, status, version, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?)`,
+    posterId,
+    company.id,
+    draft.title || draft.headline.slice(0, 60),
+    draft.headline,
+    draft.subhead || null,
+    draft.cta || null,
+    template,
+    sizeKey,
+    size.width,
+    size.height,
+    brandColor,
+    language,
+    actor.id,
+    timestamp,
+    timestamp
+  );
+
+  // Optional raster image; the poster above is the image when this is unset.
+  let imageUrl: string | null = null;
+  let imagePreviewUrl: string | null = null;
+  const generated = await generateStudioImage(c.env as any, draft.imagePrompt, size.width, size.height);
+  if (generated?.kind === 'url') {
+    imageUrl = generated.url;
+  } else if (generated?.kind === 'base64') {
+    const imageId = newId('stimg');
+    const bytes = Uint8Array.from(atob(generated.base64), (ch) => ch.charCodeAt(0));
+    await c.env.FILES.put(`studio/${imageId}.png`, bytes, {
+      httpMetadata: { contentType: generated.contentType },
+    });
+    imagePreviewUrl = `/${company.id}/social/studio/images/${imageId}`;
+  }
+
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    companyId: company.id,
+    action: 'studio.generated',
+    entityType: 'poster',
+    entityId: posterId,
+    meta: { sizeKey, variant },
+  });
+
+  const origin = new URL(c.req.url).origin;
+  return c.json(
+    {
+      draft: {
+        ...draft,
+        posterId,
+        posterPreviewUrl: `${origin}/api/company/${company.id}/posters/${posterId}/preview.svg`,
+        imageUrl,
+        imagePreviewUrl,
+        variant,
+      },
+    },
+    201
+  );
+});
+
+/** Authenticated preview of an AI-generated studio image (never public). */
+app.get('/:companyId/social/studio/images/:imageId', async (c) => {
+  if (!can(c.get('role'), CREATE) && !can(c.get('role'), 'reports.view')) {
+    return apiError(c, 403, 'forbidden');
+  }
+  const imageId = String(c.req.param('imageId') ?? '').replace(/[^a-zA-Z0-9_]/g, '');
+  if (!imageId.startsWith('stimg_')) return c.text('Not found', 404);
+  const object = await c.env.FILES.get(`studio/${imageId}.png`);
+  if (!object) return c.text('Not found', 404);
+  c.header('content-type', object.httpMetadata?.contentType ?? 'image/png');
+  c.header('cache-control', 'private, max-age=300');
+  c.header('x-content-type-options', 'nosniff');
+  return c.body(object.body);
+});
+
+/**
+ * Save a studio draft into the post library as a draft. No targets are
+ * required: the client can return to it anytime, copy the text or image,
+ * and pick platforms later from the library's edit screen.
+ */
+app.post('/:companyId/social/studio/save', async (c) => {
+  const company = c.get('company');
+  const actor = c.get('user');
+  if (!can(c.get('role'), CREATE)) return apiError(c, 403, 'forbidden');
+
+  const body = await readJson<Record<string, unknown>>(c);
+  const bodyAr = str(body.bodyAr ?? body.captionAr, 8000);
+  const bodyEn = str(body.bodyEn ?? body.captionEn, 8000);
+  if (!bodyAr && !bodyEn) return apiError(c, 422, 'post_body_required');
+  const language =
+    body.language === 'en' || body.language === 'both' || body.language === 'ar'
+      ? (body.language as 'ar' | 'en' | 'both')
+      : 'ar';
+
+  const media: Array<{ url: string; kind: 'image' | 'video'; alt?: string }> = [];
+  const posterId = str(body.posterId, 60);
+  if (posterId) {
+    const poster = await first<any>(
+      c.env,
+      'SELECT * FROM poster_drafts WHERE id = ? AND company_id = ?',
+      posterId,
+      company.id
+    );
+    if (poster) {
+      const origin = new URL(c.req.url).origin;
+      media.push({
+        url:
+          poster.status === 'approved'
+            ? `${origin}/api/public/posters/${poster.id}.svg`
+            : `${origin}/api/company/${company.id}/posters/${poster.id}/preview.svg`,
+        kind: 'image',
+        alt: poster.headline,
+      });
+    }
+  }
+  const imageUrl = str(body.imageUrl, 2000);
+  if (imageUrl && isHttpUrl(imageUrl)) media.push({ url: imageUrl, kind: 'image' });
+
+  const timestamp = nowIso();
+  const id = newId('post');
+  await run(
+    c.env,
+    `INSERT INTO social_posts (id, company_id, title, body_ar, body_en, link_url, cta_label, hashtags,
+       media_json, language, status, version, scheduled_at, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, NULL, ?, ?, ?)`,
+    id,
+    company.id,
+    str(body.title, 200) || null,
+    bodyAr || null,
+    bodyEn || null,
+    null,
+    str(body.ctaLabel ?? body.cta, 60) || null,
+    str(body.hashtags, 600) || null,
+    JSON.stringify(media),
+    language,
+    actor.id,
+    timestamp,
+    timestamp
+  );
+  const post = await first<any>(c.env, 'SELECT * FROM social_posts WHERE id = ?', id);
+  await saveVersion(c.env, post, actor.id, 'created', 1);
+  await logEvent(c.env, {
+    companyId: company.id,
+    postId: id,
+    kind: 'post.created',
+    detail: String(str(body.title, 200) || id),
+    actorUserId: actor.id,
+  });
+  const loaded = await loadPost(c.env, company.id, id);
+  return c.json({ post: serializePost(loaded!.post, loaded!.targets) }, 201);
 });
 
 // ---------------------------------------------------------------------------

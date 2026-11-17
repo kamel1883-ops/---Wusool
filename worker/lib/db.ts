@@ -15,6 +15,8 @@ export interface Env {
   AI_MODEL?: string;
   AI_API_KEY?: string;
   AI_GATEWAY_URL?: string;
+  /** Opt-in image model for the post studio; unset means poster SVG only. */
+  AI_IMAGE_MODEL?: string;
   CRAWLER_PROVIDER?: string;
   CRAWLER_ACCOUNT_ID?: string;
   CRAWLER_API_TOKEN?: string;

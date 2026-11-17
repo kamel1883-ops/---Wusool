@@ -11,6 +11,8 @@ APP_ENV=development
 #   AI_MODEL=gpt-4o-mini
 #   AI_API_KEY=
 #   AI_GATEWAY_URL=https://api.openai.com/v1
+#   AI_IMAGE_MODEL=            (optional: enables raster image generation in the post studio;
+#                               without it the studio image is the server-rendered poster)
 #   CRAWLER_PROVIDER=cloudflare
 #   CRAWLER_ACCOUNT_ID=
 #   CRAWLER_API_TOKEN=

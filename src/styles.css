@@ -4289,6 +4289,47 @@ html {
   padding: 10px 12px;
 }
 
+.studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .studio-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.studio-form,
+.studio-result {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.studio-image {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b1220;
+}
+
+.studio-image img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.studio-image figcaption {
+  padding: 8px 12px;
+  background: var(--card);
+}
+
 .code-block {
   padding: 12px;
   border-radius: 10px;

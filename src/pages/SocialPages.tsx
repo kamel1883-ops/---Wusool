@@ -175,7 +175,7 @@ export function CompanySocialPage() {
   // Deep links from the workspace cards: ?tab=library / ?tab=posters.
   const [tab, setTab] = useState(() => {
     const wanted = new URLSearchParams(window.location.search).get('tab');
-    return wanted && ['accounts', 'library', 'queue', 'posters'].includes(wanted) ? wanted : 'accounts';
+    return wanted && ['studio', 'accounts', 'library', 'queue', 'posters'].includes(wanted) ? wanted : 'studio';
   });
   const [overview, setOverview] = useState<Overview | null>(null);
   const [posts, setPosts] = useState<PostRow[]>([]);
@@ -332,6 +332,7 @@ export function CompanySocialPage() {
   if (!overview) return <Alert tone="danger">{t('common.error')}</Alert>;
 
   const tabs = [
+    { id: 'studio', label: t('social.tab.studio') },
     { id: 'accounts', label: t('social.tab.accounts') },
     { id: 'library', label: t('social.tab.library') },
     { id: 'queue', label: t('social.tab.queue') },
@@ -398,6 +399,20 @@ export function CompanySocialPage() {
           onDetails={setDetail}
           onAction={postAction}
           onNew={() => setComposer({ open: true, post: null })}
+        />
+      ) : null}
+
+      {tab === 'studio' && base ? (
+        <StudioTab
+          base={base}
+          t={t}
+          canCreate={overview.canCreate}
+          canApprove={overview.canApprove}
+          onNotice={setNotice}
+          onSaved={async () => {
+            setTab('library');
+            await load();
+          }}
         />
       ) : null}
 
@@ -897,6 +912,47 @@ function LibraryTab({
   );
 }
 
+/** Saved posts can be reopened anytime: view the image and copy the text. */
+function SavedCopy({
+  post,
+  t,
+}: {
+  post: PostRow;
+  t: (key: string, fallback?: string) => string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const image = post.media.find((item) => item.kind === 'image');
+  const copy = async () => {
+    const text = [post.bodyAr, post.bodyEn, post.hashtags].filter(Boolean).join('\n\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="social-stack">
+      {image ? (
+        <figure className="studio-image">
+          <img src={image.url} alt={post.title ?? ''} />
+          <figcaption>
+            <a href={image.url} target="_blank" rel="noreferrer" dir="ltr">
+              {t('social.openImage')}
+            </a>
+          </figcaption>
+        </figure>
+      ) : null}
+      <div className="row-actions">
+        <Button size="sm" variant="secondary" onClick={() => void copy()}>
+          {copied ? t('social.copied') : t('social.copyText')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function PostDetail({
   post,
   locale,
@@ -943,6 +999,8 @@ function PostDetail({
           </p>
         ) : null}
       </div>
+
+      <SavedCopy post={post} t={t} />
 
       {post.targets.map((target) => (
         <div key={target.id} className="social-target">
@@ -1289,6 +1347,257 @@ function Composer({
         </aside>
       </div>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Post studio — idea in, caption + image out.
+//
+// The client describes the idea in one box ("two Saudi men holding a phone,
+// the post says …"). The server writes the caption and renders the poster
+// image as a draft. The client then approves it, regenerates it (optionally
+// with a note) until it likes it, and saves it: saving stores it in the post
+// library, where the text and image can be copied anytime.
+// ---------------------------------------------------------------------------
+
+type StudioDraft = {
+  title: string;
+  captionAr: string;
+  captionEn: string;
+  hashtags: string;
+  headline: string;
+  subhead: string;
+  cta: string;
+  imagePrompt: string;
+  posterId: string;
+  posterPreviewUrl: string;
+  imageUrl: string | null;
+  imagePreviewUrl: string | null;
+  variant: number;
+};
+
+function StudioTab({
+  base,
+  t,
+  canCreate,
+  canApprove,
+  onNotice,
+  onSaved,
+}: {
+  base: string;
+  t: (key: string, fallback?: string) => string;
+  canCreate: boolean;
+  canApprove: boolean;
+  onNotice: (notice: { tone: 'ok' | 'warn' | 'danger' | 'info'; text: string } | null) => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [sizes, setSizes] = useState<Array<{ key: string; width: number; height: number }>>([]);
+  const [idea, setIdea] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [language, setLanguage] = useState<'ar' | 'en'>('ar');
+  const [sizeKey, setSizeKey] = useState('instagram_business');
+  const [draft, setDraft] = useState<StudioDraft | null>(null);
+  const [editedCaption, setEditedCaption] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [approved, setApproved] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api<{ sizes: Array<{ key: string; width: number; height: number }> }>(`${base}/posters`)
+      .then((data) => {
+        if (live) setSizes(data.sizes);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [base]);
+
+  const generate = async (variant: number, previous: StudioDraft | null) => {
+    if (idea.trim().length < 3) {
+      onNotice({ tone: 'warn', text: t('social.studio.ideaRequired') });
+      return;
+    }
+    setBusy('generate');
+    onNotice(null);
+    try {
+      const data = await api<{ draft: StudioDraft }>(`${base}/studio/generate`, {
+        method: 'POST',
+        body: {
+          idea: idea.trim(),
+          feedback: feedback.trim(),
+          language,
+          sizeKey,
+          variant,
+          previous: previous
+            ? { headline: previous.headline, caption: editedCaption || previous.captionAr || previous.captionEn }
+            : null,
+        },
+      });
+      setDraft(data.draft);
+      setEditedCaption(language === 'en' ? data.draft.captionEn || data.draft.captionAr : data.draft.captionAr || data.draft.captionEn);
+      setApproved(false);
+      setSaved(false);
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const approve = async () => {
+    if (!draft) return;
+    setBusy('approve');
+    try {
+      // Approving the poster makes its public image URL usable as the saved
+      // post's media; the post itself still goes through library approval
+      // before any publishing.
+      await api(`${base}/posters/${draft.posterId}/approve`, { method: 'POST', body: {} });
+      setApproved(true);
+      onNotice({ tone: 'ok', text: t('social.studio.approved') });
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    setBusy('save');
+    try {
+      await api(`${base}/studio/save`, {
+        method: 'POST',
+        body: {
+          title: draft.title,
+          bodyAr: language === 'en' ? draft.captionAr : editedCaption,
+          bodyEn: language === 'en' ? editedCaption : draft.captionEn,
+          hashtags: draft.hashtags,
+          ctaLabel: draft.cta,
+          language,
+          posterId: draft.posterId,
+          imageUrl: draft.imageUrl,
+        },
+      });
+      setSaved(true);
+      onNotice({ tone: 'ok', text: t('social.studio.saved') });
+      await onSaved();
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copyText = async () => {
+    try {
+      await navigator.clipboard.writeText(editedCaption);
+      onNotice({ tone: 'ok', text: t('social.copied') });
+    } catch {
+      onNotice({ tone: 'warn', text: t('social.copyFailed') });
+    }
+  };
+
+  if (!canCreate) return <EmptyState>{t('social.studio.noPermission')}</EmptyState>;
+
+  return (
+    <div className="social-stack">
+      <Card title={t('social.studio.title')} subtitle={t('social.studio.hint')}>
+        <div className="studio-grid">
+          <div className="studio-form">
+            <Field label={t('social.studio.ideaLabel')} htmlFor="studio-idea">
+              <Textarea
+                id="studio-idea"
+                rows={4}
+                dir="auto"
+                placeholder={t('social.studio.ideaPlaceholder')}
+                value={idea}
+                onChange={(event) => setIdea(event.target.value)}
+              />
+            </Field>
+            <div className="social-grid-2">
+              <Field label={t('social.posterLanguage')} htmlFor="studio-lang">
+                <Select id="studio-lang" value={language} onChange={(event) => setLanguage(event.target.value as 'ar' | 'en')}>
+                  <option value="ar">العربية</option>
+                  <option value="en">English</option>
+                </Select>
+              </Field>
+              <Field label={t('social.posterSize')} htmlFor="studio-size">
+                <Select id="studio-size" value={sizeKey} onChange={(event) => setSizeKey(event.target.value)}>
+                  {sizes.map((size) => (
+                    <option key={size.key} value={size.key}>
+                      {size.key} · {size.width}×{size.height}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <div className="row-actions">
+              <Button loading={busy === 'generate'} onClick={() => void generate(0, null)}>
+                {t('social.studio.generate')}
+              </Button>
+            </div>
+          </div>
+
+          <div className="studio-result">
+            {draft ? (
+              <>
+                <figure className="studio-image">
+                  <img src={draft.imagePreviewUrl ?? draft.imageUrl ?? draft.posterPreviewUrl} alt={draft.headline} />
+                </figure>
+                <Field label={t('social.studio.caption')} htmlFor="studio-caption">
+                  <Textarea
+                    id="studio-caption"
+                    rows={5}
+                    dir="auto"
+                    value={editedCaption}
+                    onChange={(event) => setEditedCaption(event.target.value)}
+                  />
+                </Field>
+                {draft.hashtags ? (
+                  <p className="muted small" dir="auto">
+                    {draft.hashtags}
+                  </p>
+                ) : null}
+                <p className="muted small" dir="auto">
+                  <strong>{t('social.studio.imagePrompt')}:</strong> {draft.imagePrompt}
+                </p>
+                <Field label={t('social.studio.feedbackLabel')} htmlFor="studio-feedback">
+                  <Input
+                    id="studio-feedback"
+                    dir="auto"
+                    placeholder={t('social.studio.feedbackPlaceholder')}
+                    value={feedback}
+                    onChange={(event) => setFeedback(event.target.value)}
+                  />
+                </Field>
+                <div className="row-actions">
+                  <Button variant="secondary" loading={busy === 'generate'} onClick={() => void generate(draft.variant + 1, draft)}>
+                    {t('social.studio.regenerate')}
+                  </Button>
+                  {canApprove && !approved ? (
+                    <Button loading={busy === 'approve'} onClick={() => void approve()}>
+                      {t('social.approve')}
+                    </Button>
+                  ) : null}
+                  {approved ? <span className="badge badge-ok">{t('social.studio.approvedBadge')}</span> : null}
+                  <Button variant="secondary" onClick={() => void copyText()}>
+                    {t('social.copyText')}
+                  </Button>
+                  <Button loading={busy === 'save'} disabled={saved} onClick={() => void save()}>
+                    {saved ? t('social.studio.savedBadge') : t('social.studio.save')}
+                  </Button>
+                </div>
+                {!approved ? <p className="muted small">{t('social.studio.approveHint')}</p> : null}
+              </>
+            ) : (
+              <EmptyState>{t('social.studio.empty')}</EmptyState>
+            )}
+          </div>
+        </div>
+      </Card>
+    </div>
   );
 }
 
