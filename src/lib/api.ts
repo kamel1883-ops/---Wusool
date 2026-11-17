@@ -260,6 +260,7 @@ export type StructuredAnalysisResult = {
   company_profile: { company_name: AnalysisField; industry: AnalysisField; summary: AnalysisField };
   mission: AnalysisField;
   vision: AnalysisField;
+  visual_identity: AnalysisField;
   values: AnalysisItem[];
   products_and_services: AnalysisItem[];
   target_markets: AnalysisItem[];
@@ -278,6 +279,8 @@ export type StructuredAnalysisResult = {
   content_pillars: AnalysisItem[];
   roadmap: AnalysisItem[];
   recommended_kpis: AnalysisItem[];
+  content_assets: AnalysisItem[];
+  image_opportunities: AnalysisItem[];
   missing_information: AnalysisItem[];
   assumptions_requiring_review: AnalysisItem[];
 };

@@ -155,6 +155,50 @@ export class MockAIProvider implements AIProvider {
     const ctaLine = firstMatchingLine(corpus, [/تواصل|احجز|اطلب|اشترك|سجل|contact|book|get started|request a demo|subscribe/i]);
     if (ctaLine) result.calls_to_action.push(item(ctaLine, 'website', 0.5, first.url));
 
+    // Visual evidence: the crawler appends an "Images:" inventory (alt text,
+    // file name, dimensions) to each page. Alt text found on the site is a
+    // website fact; anything about style or missing shots is inference.
+    const imageSection = corpus.split('\nImages:')[1] ?? '';
+    const imageLines = imageSection
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('- '))
+      .slice(0, 20);
+    const alted = imageLines.filter((line) => line.includes('alt="'));
+    for (const line of alted.slice(0, 6)) {
+      const alt = /alt="([^"]+)"/.exec(line)?.[1];
+      if (alt) result.content_assets.push(item(alt, 'website', 0.55, first.url));
+    }
+    if (imageLines.length) {
+      result.visual_identity = item(
+        isArabic
+          ? `يحتوي الموقع على ${imageLines.length} صورة ظاهرة في الصفحات المقروءة؛ الأسلوب البصري يحتاج مراجعة بشرية قبل اعتماده في المنشورات.`
+          : `The site shows ${imageLines.length} images across the crawled pages; the visual style needs human review before it is used in posts.`,
+        'inference',
+        0.3,
+        first.url
+      );
+    }
+    if (!alted.length && imageLines.length) {
+      result.image_opportunities.push(
+        item(
+          isArabic ? 'الصور بلا نص بديل (alt): صعّب معرفة محتواها وفهرستها — أضف نصوصًا بديلة قبل إعادة استخدامها في المنشورات.' : 'Images have no alt text: their content is hard to know and index — add alt text before reusing them in posts.',
+          'inference',
+          0.45,
+          first.url
+        )
+      );
+    } else if (imageLines.length) {
+      result.image_opportunities.push(
+        item(
+          isArabic ? 'راجع الصور الحالية وحدّد ما ينقصها (فريق العمل، قبل/بعد، استخدام فعلي) قبل بناء منشورات جديدة.' : 'Review the current images and identify what is missing (team, before/after, real usage) before building new posts.',
+          'inference',
+          0.4,
+          first.url
+        )
+      );
+    }
+
     for (const word of keywordCandidates(corpus)) {
       result.keywords.push(item(word, 'inference', 0.35, first.url));
     }

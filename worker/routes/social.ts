@@ -976,6 +976,11 @@ async function studioContext(env: any, companyId: string): Promise<string[]> {
     ? parsed.products_and_services.map(usable).filter(Boolean).slice(0, 4)
     : [];
   if (services.length) out.push(`Services: ${services.join('، ')}`);
+  // Existing site images the post can reuse, straight from the analysis.
+  const assets = Array.isArray(parsed?.content_assets)
+    ? parsed.content_assets.map(usable).filter(Boolean).slice(0, 3)
+    : [];
+  if (assets.length) out.push(`Existing visuals (reuse them): ${assets.join('، ')}`);
   return out.slice(0, 4);
 }
 

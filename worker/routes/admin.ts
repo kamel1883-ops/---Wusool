@@ -1591,6 +1591,7 @@ app.get('/integrations', async (c) => {
         'SNAPCHAT_CLIENT_SECRET',
       ]),
       ...secretStatus(['EMAIL_PROVIDER', 'EMAIL_API_KEY', 'EMAIL_FROM', 'JOBS_SECRET']),
+      ...secretStatus(['LEAD_DATA_PROVIDER', 'LEAD_DATA_API_URL', 'LEAD_DATA_API_KEY']),
     ],
     oauthRedirectUri:
       str(env.SOCIAL_OAUTH_REDIRECT_URI, 500) || '(defaults to <origin>/api/social/oauth/callback)',

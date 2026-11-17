@@ -65,6 +65,85 @@ export function pageTitle(html: string, fallbackUrl: string): string {
   }
 }
 
+/**
+ * Visual inventory of a page: every <img> with its alt text, file name and
+ * declared dimensions, plus the meta description. Appended to the extracted
+ * text so the analysis can reason about the site's images (brand assets,
+ * product shots, missing alt text) instead of seeing text only.
+ */
+export type PageImage = { src: string; alt: string; width: number | null; height: number | null };
+
+export function extractImages(html: string, base: URL): PageImage[] {
+  const images: PageImage[] = [];
+  const seen = new Set<string>();
+  const regex = /<img\b[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(html))) {
+    const tag = match[0];
+    const srcRaw =
+      /\bsrc=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i.exec(tag)?.slice(1).find(Boolean) ?? '';
+    const src = srcRaw.trim();
+    if (!src || src.startsWith('data:')) continue;
+    let absolute: string;
+    try {
+      absolute = new URL(src, base).toString();
+    } catch {
+      continue;
+    }
+    if (seen.has(absolute)) continue;
+    seen.add(absolute);
+    const attr = (name: string) => {
+      const found = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(tag);
+      return decodeEntities(found?.[1] ?? found?.[2] ?? '').trim();
+    };
+    const dimension = (name: string) => {
+      const found = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(tag);
+      const value = Number(found?.[1] ?? found?.[2]);
+      return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+    };
+    images.push({
+      src: absolute,
+      alt: attr('alt'),
+      width: dimension('width'),
+      height: dimension('height'),
+    });
+    if (images.length >= 20) break;
+  }
+  return images;
+}
+
+export function metaDescription(html: string): string {
+  const found =
+    /<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["']/i.exec(html) ??
+    /<meta[^>]+content=["']([^"']+)["'][^>]*name=["']description["']/i.exec(html);
+  return found ? decodeEntities(found[1]).trim().slice(0, 400) : '';
+}
+
+/**
+ * Appends the visual inventory to the extracted text in a stable format the
+ * analysis prompt and the local provider both understand.
+ */
+export function withVisualInventory(text: string, html: string, base: URL): string {
+  const parts: string[] = [];
+  const description = metaDescription(html);
+  if (description) parts.push(`Meta description: ${description}`);
+  const images = extractImages(html, base);
+  if (images.length) {
+    parts.push('Images:');
+    for (const image of images) {
+      let fileName = '';
+      try {
+        fileName = new URL(image.src).pathname.split('/').pop() ?? '';
+      } catch {
+        fileName = '';
+      }
+      const size = image.width && image.height ? ` | ${image.width}x${image.height}` : '';
+      parts.push(`- ${image.alt ? `alt="${image.alt}" | ` : ''}${fileName || image.src}${size}`);
+    }
+  }
+  return parts.length ? `${text}\n\n${parts.join('\n')}` : text;
+}
+
 export function extractLinks(html: string, base: URL): URL[] {
   const links: URL[] = [];
   const seen = new Set<string>();
@@ -231,7 +310,7 @@ export class FetchCrawlerProvider implements SiteCrawlerProvider {
 
       const raw = await response.text();
       const html = raw.slice(0, MAX_HTML_BYTES);
-      const text = htmlToText(html);
+      const text = withVisualInventory(htmlToText(html), html, current.url);
       const wordCount = text.split(/\s+/).filter(Boolean).length;
 
       pages.push({

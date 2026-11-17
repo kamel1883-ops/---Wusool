@@ -2945,6 +2945,29 @@ export function AdminIntegrationsPage() {
         </Table>
       </Card>
 
+      <Card title={t('admin.intGuideTitle')} subtitle={t('admin.intGuideSubtitle')}>
+        <Table head={[t('admin.intGuidePlatform'), t('admin.intGuideWhere'), t('admin.intGuideSecretNames'), t('admin.intGuideNotes')]}>
+          {[
+            ['Facebook + Instagram (Meta)', 'developers.facebook.com → Create App (Business) → Facebook Login + Instagram Graph API', 'META_APP_ID\nMETA_APP_SECRET', 'admin.intGuideMeta'],
+            ['LinkedIn', 'developer.linkedin.com → Create App → Products: Share on LinkedIn + Organization Login', 'LINKEDIN_CLIENT_ID\nLINKEDIN_CLIENT_SECRET', 'admin.intGuideLinkedIn'],
+            ['X (Twitter)', 'developer.x.com → Project + App → OAuth 2.0 User Authentication', 'X_CLIENT_ID\nX_CLIENT_SECRET', 'admin.intGuideX'],
+            ['TikTok', 'developer.tiktok.com → Create App → Login Kit + Content Posting API', 'TIKTOK_CLIENT_KEY\nTIKTOK_CLIENT_SECRET', 'admin.intGuideTikTok'],
+            ['Snapchat', 'ads.snapchat.com → Create Organization → Developer / Marketing API app', 'SNAPCHAT_CLIENT_ID\nSNAPCHAT_CLIENT_SECRET', 'admin.intGuideSnapchat'],
+            ['Licensed lead data', 'Your lead-data vendor (contract + API docs)', 'LEAD_DATA_PROVIDER\nLEAD_DATA_API_URL\nLEAD_DATA_API_KEY', 'admin.intGuideLeads'],
+          ].map((row) => (
+            <tr key={row[0]}>
+              <td>{row[0]}</td>
+              <td>{row[1]}</td>
+              <td dir="ltr">
+                <code>{row[2].replace(/\\n/g, ' · ')}</code>
+              </td>
+              <td>{t(row[3])}</td>
+            </tr>
+          ))}
+        </Table>
+        <p className="muted small">{t('admin.intGuideRedirect')}</p>
+      </Card>
+
       <Card title={t('admin.intScheduler')}>
         <p className="muted small" dir="ltr">
           {data.scheduler.state} · {data.scheduler.execution} · automatic:{' '}

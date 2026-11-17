@@ -26,6 +26,8 @@ export type StructuredAnalysisResult = {
   };
   mission: FieldValue;
   vision: FieldValue;
+  /** Visual identity inferred from the site's images (style, subjects, colours). */
+  visual_identity: FieldValue;
   values: AnalysisItem[];
   products_and_services: AnalysisItem[];
   target_markets: AnalysisItem[];
@@ -44,6 +46,10 @@ export type StructuredAnalysisResult = {
   content_pillars: AnalysisItem[];
   roadmap: AnalysisItem[];
   recommended_kpis: AnalysisItem[];
+  /** Reusable assets already on the site (product shots, team photos…). */
+  content_assets: AnalysisItem[];
+  /** Visual gaps the site should fill for stronger posts. */
+  image_opportunities: AnalysisItem[];
   missing_information: AnalysisItem[];
   assumptions_requiring_review: AnalysisItem[];
 };
@@ -52,6 +58,7 @@ export const RESULT_FIELDS = [
   'company_profile',
   'mission',
   'vision',
+  'visual_identity',
   'values',
   'products_and_services',
   'target_markets',
@@ -70,6 +77,8 @@ export const RESULT_FIELDS = [
   'content_pillars',
   'roadmap',
   'recommended_kpis',
+  'content_assets',
+  'image_opportunities',
   'missing_information',
   'assumptions_requiring_review',
 ] as const;
@@ -93,6 +102,8 @@ export const LIST_FIELDS = [
   'content_pillars',
   'roadmap',
   'recommended_kpis',
+  'content_assets',
+  'image_opportunities',
   'missing_information',
   'assumptions_requiring_review',
 ] as const;
@@ -164,6 +175,7 @@ export function emptyResult(): StructuredAnalysisResult {
     company_profile: { company_name: emptyField(), industry: emptyField(), summary: emptyField() },
     mission: emptyField(),
     vision: emptyField(),
+    visual_identity: emptyField(),
     values: list(),
     products_and_services: list(),
     target_markets: list(),
@@ -182,6 +194,8 @@ export function emptyResult(): StructuredAnalysisResult {
     content_pillars: list(),
     roadmap: list(),
     recommended_kpis: list(),
+    content_assets: list(),
+    image_opportunities: list(),
     missing_information: list(),
     assumptions_requiring_review: list(),
   };
@@ -226,6 +240,7 @@ export function normalizeResult(raw: unknown): StructuredAnalysisResult {
   }
   base.mission = normalizeField(input.mission);
   base.vision = normalizeField(input.vision);
+  base.visual_identity = normalizeField(input.visual_identity);
 
   for (const field of LIST_FIELDS) {
     const value = input[field];
@@ -265,6 +280,7 @@ export function overallConfidence(result: StructuredAnalysisResult): number {
   add(result.company_profile.summary);
   add(result.mission);
   add(result.vision);
+  add(result.visual_identity);
   for (const field of LIST_FIELDS) {
     for (const entry of result[field]) {
       if (entry.value && entry.source !== 'missing') scores.push(entry.confidence);
@@ -290,6 +306,7 @@ export function sourceSummary(result: StructuredAnalysisResult) {
   count(result.company_profile.summary);
   count(result.mission);
   count(result.vision);
+  count(result.visual_identity);
   for (const field of LIST_FIELDS) for (const entry of result[field]) count(entry as FieldValue);
   return { website, inference, suggestion, missing: result.missing_information.length };
 }

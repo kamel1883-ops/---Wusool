@@ -230,8 +230,11 @@ export function CompanySocialPage() {
         .catch((error) => setNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) }));
     } else if (oauth === 'denied') {
       setNotice({ tone: 'warn', text: t('social.oauthDenied') });
+    } else if (oauth === 'select') {
+      setNotice({ tone: 'ok', text: t('social.oauthAuthorized') });
     } else {
-      setNotice({ tone: 'danger', text: t('social.connectFailed') });
+      // Specific, client-safe reasons from the callback — never a raw code.
+      setNotice({ tone: 'danger', text: t(`social.oauthError.${oauth}`, t('social.connectFailed')) });
     }
     window.history.replaceState({}, '', window.location.pathname);
   }, [base, t]);

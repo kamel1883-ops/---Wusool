@@ -36,6 +36,8 @@ export const GROWTH_AR: Record<string, string> = {
   'growth.icpTitle': 'ملف العميل المثالي',
   'growth.icpHint': 'يُبنى من تحليل معتمد، ويمكن تعديله يدويًا. كل تعديل يدوي يُسجَّل في سجل التدقيق.',
   'growth.icpEmpty': 'لا يوجد ملف بعد — استخرج الملف من تحليل معتمد أو اكتبه يدويًا.',
+  'growth.icpChooseAnalysis': 'الموقع المراد اكتساب العملاء له',
+  'growth.icpAnalysisOption': 'التحليل {n}',
   'growth.icpDerive': 'استخراج من التحليل المعتمد',
   'growth.icpDerived': 'تم استخراج الملف من التحليل المعتمد مع أدلته.',
   'growth.icpNeedsAnalysis': 'لا يوجد تحليل معتمد بعد.',
@@ -318,6 +320,8 @@ export const GROWTH_EN: Record<string, string> = {
   'growth.icpHint':
     'Built from an approved analysis and editable by hand. Every manual edit is written to the audit log.',
   'growth.icpEmpty': 'No profile yet — derive it from an approved analysis or write it manually.',
+  'growth.icpChooseAnalysis': 'Site to acquire leads for',
+  'growth.icpAnalysisOption': 'Analysis {n}',
   'growth.icpDerive': 'Derive from approved analysis',
   'growth.icpDerived': 'Profile derived from the approved analysis with its evidence.',
   'growth.icpNeedsAnalysis': 'No approved analysis yet.',

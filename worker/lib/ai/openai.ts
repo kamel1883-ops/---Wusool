@@ -41,6 +41,7 @@ never shorten the object with ellipses:
   "company_profile": { "company_name": FIELD, "industry": FIELD, "summary": FIELD },
   "mission": FIELD,
   "vision": FIELD,
+  "visual_identity": FIELD,
   "values": [ITEM],
   "products_and_services": [ITEM],
   "target_markets": [ITEM],
@@ -59,6 +60,8 @@ never shorten the object with ellipses:
   "content_pillars": [ITEM],
   "roadmap": [ITEM],
   "recommended_kpis": [ITEM],
+  "content_assets": [ITEM],
+  "image_opportunities": [ITEM],
   "missing_information": [ITEM],
   "assumptions_requiring_review": [ITEM]
 }
@@ -85,6 +88,15 @@ Rules:
   marketing_channels, recommended_campaigns, content_pillars, roadmap,
   recommended_kpis) as "suggestion"/"inference" items — they are your work,
   and an empty advice section is a failed report even when the site is thin.
+- Visual sections: each page ends with an "Images:" inventory (alt text, file
+  name, dimensions) and possibly a "Meta description:" line. Use them for:
+  - visual_identity: the brand's visual style (subjects, colours, composition)
+    inferred from the images; source "inference" unless an alt text states it.
+  - content_assets: existing images that can be reused in posts (product
+    shots, team photos, hero images). Source "website" with the image URL as
+    evidence_url when the alt text describes it.
+  - image_opportunities: visual gaps worth filling later (e.g. no team photo,
+    no before/after shots). Source "inference".
 - Write values in the requested language: ar, en, or ar-en for both.`;
 
 /**
@@ -130,9 +142,16 @@ function buildUserPrompt(input: AnalyzeInput) {
   let budget = MAX_PROMPT_CHARS;
   for (const page of input.pages) {
     if (budget <= 0) break;
-    const slice = page.contentMarkdown.slice(0, Math.min(3000, budget));
-    budget -= slice.length;
-    parts.push(`\n--- ${page.url} — ${page.title}\n${slice}`);
+    // Keep the Images: inventory even when the page is truncated: it is the
+    // visual evidence for the visual sections, so it wins over body text.
+    const full = page.contentMarkdown;
+    const imagesAt = full.indexOf('\nImages:');
+    const body = imagesAt > 0 ? full.slice(0, imagesAt) : full;
+    const tail = imagesAt > 0 ? full.slice(imagesAt) : '';
+    const bodySlice = body.slice(0, Math.min(2200, budget));
+    const tailSlice = tail.slice(0, Math.max(0, Math.min(800, budget - bodySlice.length)));
+    budget -= bodySlice.length + tailSlice.length;
+    parts.push(`\n--- ${page.url} — ${page.title}\n${bodySlice}${tailSlice}`);
   }
   return parts.join('\n');
 }

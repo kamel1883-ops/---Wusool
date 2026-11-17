@@ -400,7 +400,19 @@ async function loadIcp(env: any, companyId: string) {
   return row ? serializeIcp(row) : EMPTY_ICP;
 }
 
-async function approvedAnalysis(env: any, companyId: string) {
+async function approvedAnalysis(env: any, companyId: string, analysisId?: string) {
+  if (analysisId) {
+    return first<any>(
+      env,
+      `SELECT a.id, a.url, a.approved_version, a.completed_at, r.result_json
+         FROM site_analyses a
+         LEFT JOIN analysis_results r
+           ON r.analysis_id = a.id AND r.version = a.approved_version
+        WHERE a.company_id = ? AND a.id = ? AND a.status = 'approved' AND a.approved_version IS NOT NULL`,
+      companyId,
+      analysisId
+    );
+  }
   return first<any>(
     env,
     `SELECT a.id, a.url, a.approved_version, a.completed_at, r.result_json
@@ -409,6 +421,17 @@ async function approvedAnalysis(env: any, companyId: string) {
          ON r.analysis_id = a.id AND r.version = a.approved_version
       WHERE a.company_id = ? AND a.status = 'approved' AND a.approved_version IS NOT NULL
       ORDER BY a.completed_at DESC LIMIT 1`,
+    companyId
+  );
+}
+
+async function approvedAnalyses(env: any, companyId: string) {
+  return all<any>(
+    env,
+    `SELECT a.id, a.url, a.approved_version, a.completed_at
+       FROM site_analyses a
+      WHERE a.company_id = ? AND a.status = 'approved' AND a.approved_version IS NOT NULL
+      ORDER BY a.completed_at DESC`,
     companyId
   );
 }
@@ -510,11 +533,18 @@ app.get('/:companyId/growth', async (c) => {
     company.id
   );
 
+  const analyses = await approvedAnalyses(c.env, company.id);
   return c.json({
     icp,
     analysis: analysis
       ? { id: analysis.id, url: analysis.url, approvedVersion: analysis.approved_version, approvedAt: analysis.completed_at }
       : null,
+    analyses: analyses.map((item) => ({
+      id: item.id,
+      url: item.url,
+      approvedVersion: item.approved_version,
+      approvedAt: item.completed_at,
+    })),
     sources: [
       {
         provider: 'openstreetmap',
@@ -648,7 +678,9 @@ app.post('/:companyId/growth/icp/derive', async (c) => {
   const actor = c.get('user');
   if (!can(c.get('role'), MANAGE)) return apiError(c, 403, 'forbidden');
 
-  const analysis = await approvedAnalysis(c.env, company.id);
+  const body = await readJson<Record<string, unknown>>(c);
+  const analysisId = str(body.analysisId, 60) || undefined;
+  const analysis = await approvedAnalysis(c.env, company.id, analysisId);
   if (!analysis) return apiError(c, 409, 'analysis_not_approved');
 
   const derived = deriveIcp(analysis.result_json);

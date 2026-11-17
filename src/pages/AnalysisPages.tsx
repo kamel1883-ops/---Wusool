@@ -493,6 +493,27 @@ const SECTIONS: SectionConfig[] = [
     set: (r, items) => ({ ...r, recommended_kpis: items }),
   },
   {
+    id: 'visual_identity',
+    titleKey: 'analysis.sectionVisualIdentity',
+    kind: 'field',
+    get: (r) => r.visual_identity,
+    set: (r, item) => ({ ...r, visual_identity: item }),
+  },
+  {
+    id: 'content_assets',
+    titleKey: 'analysis.sectionContentAssets',
+    kind: 'list',
+    get: (r) => r.content_assets,
+    set: (r, items) => ({ ...r, content_assets: items }),
+  },
+  {
+    id: 'image_opportunities',
+    titleKey: 'analysis.sectionImageOpportunities',
+    kind: 'list',
+    get: (r) => r.image_opportunities,
+    set: (r, items) => ({ ...r, image_opportunities: items }),
+  },
+  {
     id: 'missing_information',
     titleKey: 'analysis.sectionMissing',
     kind: 'list',

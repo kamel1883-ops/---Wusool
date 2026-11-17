@@ -64,6 +64,7 @@ type ChannelInfo = {
 type Overview = {
   icp: Icp;
   analysis: { id: string; url: string; approvedVersion: number; approvedAt: string | null } | null;
+  analyses: Array<{ id: string; url: string; approvedVersion: number; approvedAt: string | null }>;
   sources: SourceInfo[];
   channels: ChannelInfo[];
   stats: {
@@ -269,7 +270,7 @@ export function CompanyGrowthPage() {
 
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
-      {tab === 'icp' ? <IcpPanel companyId={companyId!} icp={data.icp} analysis={data.analysis} canManage={data.canManage} onSaved={refresh} /> : null}
+      {tab === 'icp' ? <IcpPanel companyId={companyId!} icp={data.icp} analysis={data.analysis} analyses={data.analyses ?? []} canManage={data.canManage} onSaved={refresh} /> : null}
       {tab === 'sources' ? <SourcesPanel sources={data.sources} t={t} locale={locale} /> : null}
       {tab === 'leads' ? (
         <LeadsPanel
@@ -323,12 +324,14 @@ function IcpPanel({
   companyId,
   icp,
   analysis,
+  analyses,
   canManage,
   onSaved,
 }: {
   companyId: string;
   icp: Icp;
   analysis: Overview['analysis'];
+  analyses: Overview['analyses'];
   canManage: boolean;
   onSaved: () => void;
 }) {
@@ -345,13 +348,17 @@ function IcpPanel({
   });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: 'ok' | 'danger'; text: string } | null>(null);
+  const [analysisId, setAnalysisId] = useState(analysis?.id ?? '');
   const empty = !icp.services.length && !icp.sectors.length && !icp.idealAudience;
 
   const derive = async () => {
     setBusy(true);
     setMessage(null);
     try {
-      await api(`/api/company/${companyId}/growth/icp/derive`, { method: 'POST' });
+      await api(`/api/company/${companyId}/growth/icp/derive`, {
+        method: 'POST',
+        body: analysisId ? { analysisId } : {},
+      });
       setMessage({ tone: 'ok', text: t('growth.icpDerived') });
       onSaved();
     } catch (err) {
@@ -387,6 +394,17 @@ function IcpPanel({
         {message ? <Alert tone={message.tone}>{message.text}</Alert> : null}
         {empty ? <Alert tone="info">{t('growth.icpEmpty')}</Alert> : null}
         <div className="row-actions growth-icp-actions">
+          {analyses.length > 1 ? (
+            <Field label={t('growth.icpChooseAnalysis')} htmlFor="icp-analysis">
+              <Select id="icp-analysis" value={analysisId} onChange={(event) => setAnalysisId(event.target.value)}>
+                {analyses.map((item, index) => (
+                  <option key={item.id} value={item.id}>
+                    {t('growth.icpAnalysisOption').replace('{n}', String(index + 1))} · {item.url}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <Button size="sm" variant="secondary" loading={busy} disabled={!canManage} onClick={() => void derive()}>
             {t('growth.icpDerive')}
           </Button>
@@ -564,14 +582,7 @@ function SourcesPanel({
           ))}
         </ul>
       </Card>
-      <Card title={t('growth.discoveryRulesTitle')}>
-        <ul className="growth-rules">
-          <li>{t('growth.ruleEvidence')}</li>
-          <li>{t('growth.ruleNoScraping')}</li>
-          <li>{t('growth.ruleNoFakeContact')}</li>
-          <li>{t('growth.ruleNoFakeConnector')}</li>
-        </ul>
-      </Card>
+
     </div>
   );
 }
