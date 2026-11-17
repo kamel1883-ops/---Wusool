@@ -758,9 +758,15 @@ app.post('/:companyId/growth/discover', async (c) => {
   try {
     if (source.kind === 'open_data') {
       // OpenStreetMap is queried inside one Saudi metro area taken from the
-      // tenant's own profile. An unsupported city is refused, never widened
-      // into a country-wide query.
-      targetCity = resolveSaudiCity(icp.cities[0] ?? '');
+      // tenant's own profile. Every listed city is tried in order, so one
+      // unsupported entry does not block the rest; when none resolves the
+      // run is refused instead of widening into a country-wide query.
+      // Coverage is Saudi Arabia only — there is no other country to pick.
+      targetCity = null;
+      for (const entry of icp.cities) {
+        targetCity = resolveSaudiCity(entry ?? '');
+        if (targetCity) break;
+      }
       if (!targetCity) return apiError(c, 422, 'lead_city_not_supported');
 
       // Overpass is a shared public service. One query per run is already the
@@ -1054,7 +1060,7 @@ app.post('/:companyId/growth/leads', async (c) => {
       str(body.jobTitle, 120) || null,
       str(body.sector, 120) || null,
       str(body.city, 120) || null,
-      str(body.country, 120) || null,
+      str(body.country, 120) || 'المملكة العربية السعودية',
       email || null,
       email ? emailSource : null,
       phone || null,

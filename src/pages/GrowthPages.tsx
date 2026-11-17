@@ -130,6 +130,21 @@ const STAGES = ['new', 'qualified', 'contacted', 'replied', 'meeting', 'proposal
 const SIGNALS = ['search_intent', 'public_request', 'public_question', 'company_fit', 'inbound'];
 const label = (value: string, t: (key: string) => string) => t(`growth.enum.${value}`);
 
+type SaudiCity = { ar: string; en: string };
+
+/**
+ * Saudi Arabia is the only discovery coverage: one static list from the
+ * server is the only city picker in the product — no country picker exists.
+ */
+function useSaudiCities() {
+  const { data } = useApi<{ country: { ar: string; en: string }; cities: SaudiCity[] }>(
+    '/api/public/saudi-cities'
+  );
+  return data;
+}
+
+const cityName = (city: SaudiCity, locale: string) => (locale === 'ar' ? city.ar : city.en);
+
 function StateChip({ state, t }: { state: string; t: (key: string) => string }) {
   const tone =
     state === 'connected'
@@ -318,10 +333,11 @@ function IcpPanel({
   onSaved: () => void;
 }) {
   const { t, locale } = useSession();
+  const saudi = useSaudiCities();
   const [form, setForm] = useState({
     services: icp.services.join('، '),
     sectors: icp.sectors.join('، '),
-    cities: icp.cities.join('، '),
+    cities: [...icp.cities],
     keywords: icp.keywords.join('، '),
     problems: icp.problems.join('، '),
     idealAudience: icp.idealAudience,
@@ -403,13 +419,43 @@ function IcpPanel({
             />
           </Field>
           <Field label={t('growth.icpCities')} htmlFor="icp-cities">
-            <Textarea
-              id="icp-cities"
-              rows={2}
-              value={form.cities}
-              disabled={!canManage}
-              onChange={(event) => setForm({ ...form, cities: event.target.value })}
-            />
+            <p className="muted small">{t('growth.icpCitiesHint')}</p>
+            {saudi ? (
+              <div className="saudi-cities-grid" id="icp-cities">
+                {saudi.cities.map((city) => {
+                  const checked = form.cities.includes(city.ar);
+                  return (
+                    <label key={city.ar} className="saudi-city-option">
+                      <input
+                        type="checkbox"
+                        disabled={!canManage}
+                        checked={checked}
+                        onChange={() =>
+                          setForm({
+                            ...form,
+                            cities: checked
+                              ? form.cities.filter((item) => item !== city.ar)
+                              : [...form.cities, city.ar],
+                          })
+                        }
+                      />
+                      <span>{cityName(city, locale)}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <Textarea
+                id="icp-cities"
+                rows={2}
+                value={form.cities.join('، ')}
+                disabled={!canManage}
+                onChange={(event) =>
+                  setForm({ ...form, cities: event.target.value.split(/[,،\n]/).map((item) => item.trim()).filter(Boolean) })
+                }
+              />
+            )}
+            <p className="muted small">{t('growth.countryFixed')}</p>
           </Field>
           <Field label={t('growth.icpKeywords')} htmlFor="icp-keywords">
             <Textarea
@@ -1037,13 +1083,13 @@ function LeadFormModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { t } = useSession();
+  const { t, locale } = useSession();
+  const saudi = useSaudiCities();
   const [form, setForm] = useState({
     name: '',
     companyName: '',
     sector: '',
     city: '',
-    country: '',
     email: '',
     emailSource: 'public_page',
     phone: '',
@@ -1062,7 +1108,11 @@ function LeadFormModal({
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/company/${companyId}/growth/leads`, { method: 'POST', body: form });
+      await api(`/api/company/${companyId}/growth/leads`, {
+        method: 'POST',
+        // Saudi Arabia only: the country is fixed, never picked.
+        body: { ...form, country: 'المملكة العربية السعودية' },
+      });
       onSaved();
     } catch (err) {
       setError(t(errorKey((err as ApiError).code)));
@@ -1093,9 +1143,25 @@ function LeadFormModal({
             <Input id="lead-sector" value={form.sector} onChange={(event) => setForm({ ...form, sector: event.target.value })} />
           </Field>
           <Field label={t('growth.city')} htmlFor="lead-city">
-            <Input id="lead-city" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} />
+            {saudi ? (
+              <Select
+                id="lead-city"
+                value={form.city}
+                onChange={(event) => setForm({ ...form, city: event.target.value })}
+              >
+                <option value="">{t('growth.citySelectPlaceholder')}</option>
+                {saudi.cities.map((city) => (
+                  <option key={city.ar} value={city.ar}>
+                    {cityName(city, locale)}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input id="lead-city" value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value })} />
+            )}
           </Field>
         </div>
+        <p className="muted small">{t('growth.countryFixed')}</p>
         <Field label={t('growth.signal')} htmlFor="lead-signal">
           <Select
             id="lead-signal"

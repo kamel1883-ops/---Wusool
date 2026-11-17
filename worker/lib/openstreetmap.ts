@@ -55,7 +55,7 @@ export const SAUDI_CITIES: SaudiCity[] = [
   { ar: 'الرياض', en: 'Riyadh', bbox: [24.3, 46.2, 25.1, 47.2], aliases: ['رياض', 'riyadh', 'al riyadh', 'ar riyadh'] },
   { ar: 'جدة', en: 'Jeddah', bbox: [21.2, 39.0, 21.9, 39.4], aliases: ['جده', 'jeddah', 'jedda', 'jiddah'] },
   { ar: 'مكة المكرمة', en: 'Makkah', bbox: [21.28, 39.68, 21.52, 39.98], aliases: ['مكة', 'مكه', 'مكه المكرمه', 'makkah', 'mecca', 'makkah al mukarramah'] },
-  { ar: 'المدينة المنورة', en: 'Madinah', bbox: [24.35, 39.47, 24.62, 39.75], aliases: ['المدينة', 'المدينه', 'مدينه', 'madinah', 'medina', 'al madinah'] },
+  { ar: 'المدينة المنورة', en: 'Madinah', bbox: [24.35, 39.47, 24.62, 39.75], aliases: ['المدينة', 'المدينه', 'madinah', 'medina', 'al madinah'] },
   { ar: 'الدمام', en: 'Dammam', bbox: [26.32, 49.95, 26.55, 50.25], aliases: ['دمام', 'dammam', 'ad dammam'] },
   { ar: 'الخبر', en: 'Khobar', bbox: [26.18, 50.1, 26.34, 50.28], aliases: ['khobar', 'al khobar', 'khubar'] },
   { ar: 'الظهران', en: 'Dhahran', bbox: [26.22, 50.08, 26.34, 50.2], aliases: ['dhahran'] },

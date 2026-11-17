@@ -620,6 +620,15 @@ async function httpChecks() {
   );
   check('the dedupe run sends exactly one more query', mock.state.count === 2, mock.state.count);
 
+  await owner.req(`${base}/icp`, { method: 'PUT', body: { cities: ['دبي', 'جدة'] } });
+  await sleep(2200);
+  const fallbackCity = await owner.req(`${base}/discover`, { method: 'POST', body: { limit: 10 } });
+  check(
+    'an unsupported first city falls back to the next Saudi city',
+    fallbackCity.status === 200 && fallbackCity.data?.city === 'جدة',
+    fallbackCity.data
+  );
+
   const clinic = rows.find((lead) => lead.companyName === 'Al Noor Clinics');
   const confirmed = await owner.req(`${base}/leads/${clinic.id}`, {
     method: 'PATCH',

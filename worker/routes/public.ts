@@ -34,6 +34,7 @@ import {
 import { ROLE_PERMISSIONS, type CompanyRole } from '../lib/rbac';
 import { sha256Hex } from '../lib/auth';
 import { ensureSchema } from '../lib/init';
+import { SAUDI_CITIES } from '../lib/openstreetmap';
 
 const app = new Hono<AppEnv>();
 
@@ -68,6 +69,18 @@ app.get('/public/branding', async (c) => {
  * Hosted-database bootstrap. Idempotent and side-effect free beyond creating
  * missing tables/seeds, so the Setup screen calls it before anything else.
  */
+/**
+ * Saudi metro areas covered by open-data discovery. Public and static: the
+ * product operates in Saudi Arabia only, so clients render these as the only
+ * selectable cities and never offer another country.
+ */
+app.get('/public/saudi-cities', async (c) => {
+  return c.json({
+    country: { ar: 'المملكة العربية السعودية', en: 'Saudi Arabia' },
+    cities: SAUDI_CITIES.map((city) => ({ ar: city.ar, en: city.en })),
+  });
+});
+
 app.post('/setup/init', async (c) => {
   const result = await ensureSchema(c.env);
   return c.json({ ok: true, ...result });

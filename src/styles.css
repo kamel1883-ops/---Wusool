@@ -3546,6 +3546,30 @@ html {
   color: #33455c;
 }
 
+.saudi-cities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.saudi-city-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+  background: #fff;
+}
+
+.saudi-city-option input {
+  accent-color: var(--brand);
+}
+
 .growth-rules li::before {
   content: '•';
   color: var(--brand);
