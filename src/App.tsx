@@ -44,6 +44,7 @@ import {
   AdminOverviewPage,
   AdminPlansPage,
   AdminSettingsPage,
+  AdminIntegrationsPage,
   AdminUsagePage,
   AdminUsersPage,
 } from './pages/AdminPages';
@@ -145,6 +146,7 @@ export default function App() {
             <Route path="usage" element={<AdminUsagePage />} />
             <Route path="audit" element={<AdminAuditPage />} />
             <Route path="settings" element={<AdminSettingsPage />} />
+            <Route path="integrations" element={<AdminIntegrationsPage />} />
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />

@@ -22,6 +22,23 @@ APP_ENV=development
 # First-admin allowlist for /api/setup (server env only, never commit a value):
 #   SETUP_ADMIN_EMAIL=
 
+# --- Lead discovery ----------------------------------------------------------
+# Discovered records are stored as potential leads (classification=potential)
+# with their source link, discovery date, evidence and match score. Only a human
+# stage change or recorded consent marks one as confirmed.
+# Free, no-key open data: OpenStreetMap through Overpass (ODbL). One bounded
+# query per run inside a Saudi city taken from the ideal-customer profile.
+# LEAD_DATA_PROVIDER=openstreetmap
+# Optional: point at a mirror or a self-hosted Overpass when the public one is busy.
+# LEAD_DATA_API_URL=https://overpass-api.de/api/interpreter
+# Seconds between runs per company; keeps repeated clicks off the shared service.
+# LEAD_DISCOVERY_COOLDOWN_SECONDS=15
+#
+# Or a licensed lead-data provider (needs all three):
+# LEAD_DATA_PROVIDER=
+# LEAD_DATA_API_URL=
+# LEAD_DATA_API_KEY=
+
 # --- Social accounts and publishing (optional; the screens run without them) --
 # 32 random bytes, base64. Required before any account can be connected:
 #   SOCIAL_TOKEN_KEY=

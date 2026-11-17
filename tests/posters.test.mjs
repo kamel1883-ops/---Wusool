@@ -156,6 +156,7 @@ async function main() {
     'migrations/0004_setup_codes.sql',
     'migrations/0005_concurrency.sql',
     'migrations/0006_growth.sql',
+    'migrations/0011_lead_classification.sql',
     'migrations/0007_social.sql',
     'migrations/0008_social_review.sql',
     'migrations/0009_tracking.sql',

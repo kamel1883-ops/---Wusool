@@ -155,6 +155,44 @@ const serializeConnection = (row: any) => ({
   metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
 });
 
+/**
+ * A public profile link is only included when it can be built from a stable
+ * identifier the provider returned (a Page id, a username). Otherwise it is
+ * null and the client hides the "open account" action instead of guessing.
+ */
+const profileUrlFor = (row: any): string | null => {
+  if (row.platform === 'facebook_page' && row.page_id) {
+    return `https://www.facebook.com/${row.page_id}`;
+  }
+  const metadata = parseJson<Record<string, unknown>>(row.metadata_json, {});
+  const username = typeof metadata.username === 'string' ? metadata.username.replace(/^@/, '') : '';
+  if (row.platform === 'instagram_business' && username) {
+    return `https://www.instagram.com/${username}`;
+  }
+  if (row.platform === 'x_twitter' && username) {
+    return `https://x.com/${username}`;
+  }
+  return null;
+};
+
+/**
+ * What a company member may see: the account identity, its live state and a
+ * link to the public profile. Scopes, expiry, sync details, raw provider
+ * errors and stored metadata stay on the server; the super-admin console
+ * reads those through /api/admin/integrations instead.
+ */
+const serializeConnectionForClient = (row: any) => ({
+  id: row.id,
+  platform: row.platform,
+  pageId: row.page_id,
+  profileId: row.profile_id,
+  accountName: row.account_name,
+  accountType: row.account_type,
+  tokenStatus: tokenStatusOf(row),
+  connectedAt: row.connected_at,
+  profileUrl: profileUrlFor(row),
+});
+
 const serializeTarget = (row: any) => {
   const adapted = parseJson<any>(row.adapted_json, {});
   return {
@@ -397,29 +435,51 @@ app.get('/:companyId/social', async (c) => {
     Number(settings['subscription.warning_days'] ?? '30') || 30
   );
 
+  // Super admins keep the full technical picture (it powers the integrations
+  // console). Everyone else gets a client-safe shape: no env-var names, no
+  // scopes, no review notes, no expiry or error internals.
+  const isSuperAdmin = c.get('user')?.platformRole === 'super_admin';
+
   const platforms = PLATFORM_ORDER.map((key) => {
     const spec = PLATFORMS[key];
     const availability = availabilityOf(key, c.env as any, settings);
+    const platformConnections = isSuperAdmin
+      ? connections.filter((connection) => connection.platform === key)
+      : rows
+          .filter((row) => row.platform === key)
+          .map((row) => serializeConnectionForClient(row));
+    if (isSuperAdmin) {
+      return {
+        key,
+        name: spec.name,
+        category: spec.category,
+        connector: spec.connector,
+        accountRequirement: spec.accountRequirement,
+        capabilities: spec.capabilities,
+        access: spec.access,
+        limits: spec.limits,
+        publishable: publishesAnything(key),
+        oauthImplemented: isOauthPlatform(key),
+        // `state` is what the channel can actually do in this build;
+        // `availability` only says whether an authorization can be started.
+        state: platformStateOf(key, c.env as any, settings),
+        capabilityStates: capabilityStatesOf(key),
+        availability: availability.state,
+        availabilityReasons: availability.reasons,
+        accessApproved: availability.accessApproved,
+        reviewPending: availability.reviewPending,
+        connections: platformConnections,
+      };
+    }
     return {
       key,
       name: spec.name,
       category: spec.category,
-      connector: spec.connector,
-      accountRequirement: spec.accountRequirement,
-      capabilities: spec.capabilities,
-      access: spec.access,
-      limits: spec.limits,
       publishable: publishesAnything(key),
       oauthImplemented: isOauthPlatform(key),
-      // `state` is what the channel can actually do in this build;
-      // `availability` only says whether an authorization can be started.
       state: platformStateOf(key, c.env as any, settings),
-      capabilityStates: capabilityStatesOf(key),
       availability: availability.state,
-      availabilityReasons: availability.reasons,
-      accessApproved: availability.accessApproved,
-      reviewPending: availability.reviewPending,
-      connections: connections.filter((connection) => connection.platform === key),
+      connections: platformConnections,
     };
   });
 
@@ -445,8 +505,9 @@ app.get('/:companyId/social', async (c) => {
 
   return c.json({
     platforms,
-    connections,
-    setup: {
+    connections: isSuperAdmin ? connections : rows.map((row) => serializeConnectionForClient(row)),
+    setup: isSuperAdmin
+      ? {
       tokenKeyConfigured: tokenKeyConfigured(c.env as any),
       meta: { configured: config.meta.configured, requires: config.meta.requires },
       google: { configured: config.google.configured, requires: config.google.requires },
@@ -458,7 +519,8 @@ app.get('/:companyId/social', async (c) => {
         execution: 'manual_or_external',
         automatic: false,
       },
-    },
+    }
+      : null,
     analytics: {
       state: 'not_implemented',
       note: 'Reading GA4 reports, Search Console queries, Meta/Instagram insights or Business Profile metrics is not implemented. Only manual campaign results are available.',

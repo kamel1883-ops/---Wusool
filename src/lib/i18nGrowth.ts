@@ -16,7 +16,8 @@ export const GROWTH_AR: Record<string, string> = {
   'growth.tab.channels': 'القنوات المتصلة',
   'growth.tab.results': 'النتائج والتحويلات',
 
-  'growth.stat.leads': 'عملاء محتملون',
+  'growth.stat.leads': 'إجمالي السجلات',
+  'growth.stat.potential': 'محتملون (غير مؤهلين)',
   'growth.stat.qualified': 'مؤهلون',
   'growth.stat.consented': 'موافقة مسجّلة',
   'growth.stat.campaigns': 'حملات',
@@ -73,6 +74,10 @@ export const GROWTH_AR: Record<string, string> = {
   'growth.requires': 'المطلوب للتفعيل:',
   'growth.approval': 'الموافقة المطلوبة',
   'growth.adapterPending': 'إرسال هذه القناة غير مكتمل في هذه النسخة، لذا لا تُعدّ جاهزة للإرسال.',
+  'growth.channelNeedsActivation': 'تحتاج تفعيلًا من إدارة المنصة — لا يُطلب منك أي مفاتيح هنا.',
+  'growth.metaOAuthHint':
+    'النشر على Facebook وInstagram يتم من صفحة «الحسابات والقنوات» عبر ربط OAuth الخاص بشركتك، وليس بمفاتيح ثابتة هنا.',
+  'growth.noSendableChannel': 'لا توجد قناة جاهزة للإرسال بعد — اطلب من إدارة المنصة تفعيل قناة أولًا.',
 
   'growth.leadsTitle': 'العملاء المحتملون المكتشفون',
   'growth.addLead': 'إضافة عميل موثّق',
@@ -82,13 +87,20 @@ export const GROWTH_AR: Record<string, string> = {
   'growth.stage': 'المرحلة',
   'growth.columnLead': 'العميل',
   'growth.columnSector': 'القطاع',
-  'growth.columnScore': 'التأهيل',
+  'growth.columnScore': 'درجة التطابق',
   'growth.columnReason': 'سبب الترشيح والمصدر',
   'growth.columnStage': 'المرحلة',
   'growth.columnConsent': 'الموافقة',
   'growth.columnDate': 'تاريخ الاكتشاف',
   'growth.leadsEmpty': 'لا يوجد عملاء محتملون بعد.',
   'growth.leadsEmptyHint': 'فعّل مصدر اكتشاف معتمدًا، أو أضف عميلًا موثّقًا برابط مصدره.',
+  'growth.classification.potential': 'محتمل — يحتاج مراجعة',
+  'growth.classification.confirmed': 'مُتحقَّق منه بشريًا',
+  'growth.classificationHint':
+    'نتائج الاكتشاف تُخزَّن كعملاء محتملين، لا كعملاء مؤكدين. التأكيد يحدث فقط بتغيير المرحلة أو تسجيل الموافقة يدويًا.',
+  'growth.matchScoreLabel': 'درجة التطابق مع نشاطك',
+  'growth.osmNote':
+    'بيانات OpenStreetMap © مساهمو OpenStreetMap، بترخيص ODbL. تُعرض كشركات محتملة حسب الموقع والنشاط وتحتاج مراجعة بشرية.',
   'growth.details': 'التفاصيل',
   'growth.logContact': 'سجل التواصل',
   'growth.whyLead': 'لماذا رُشِّح هذا العميل',
@@ -116,6 +128,7 @@ export const GROWTH_AR: Record<string, string> = {
   'growth.saveLead': 'حفظ العميل',
 
   'growth.sourceKind.licensed_provider': 'مزوّد بيانات مرخّص',
+  'growth.sourceKind.open_data': 'بيانات مفتوحة (OpenStreetMap، ODbL)',
   'growth.sourceKind.manual_research': 'بحث يدوي موثّق',
   'growth.sourceKind.crm_import': 'استيراد من CRM',
   'growth.sourceKind.inbound_form': 'طلب وارد',
@@ -232,6 +245,10 @@ export const GROWTH_AR: Record<string, string> = {
 
   'err.lead_source_not_connected': 'مصدر اكتشاف العملاء غير مفعّل بعد.',
   'err.lead_source_failed': 'تعذّر الوصول إلى مصدر البيانات. لم يُسجَّل أي عميل.',
+  'err.lead_source_busy': 'خادم OpenStreetMap مشغول الآن. أعد المحاولة بعد قليل؛ لم يُسجَّل أي عميل.',
+  'err.lead_source_timeout': 'انتهت مهلة استعلام OpenStreetMap. لم يُسجَّل أي عميل؛ أعد المحاولة أو استخدم نسخة أخرى من الخدمة.',
+  'err.lead_city_not_supported': 'لا توجد مدينة سعودية مدعومة في ملف العميل المثالي. أضف مدينة مثل «الرياض» أو «جدة» في تبويب ملف العميل ثم أعد المحاولة.',
+  'err.lead_source_cooldown': 'تم الاستعلام من OpenStreetMap قبل لحظات. انتظر قليلًا قبل التشغيل التالي.',
   'err.analysis_not_approved': 'يلزم اعتماد تحليل الموقع أولًا.',
   'err.icp_not_derivable': 'لا توجد بيانات كافية في التحليل لبناء ملف العميل.',
   'err.lead_name_required': 'اسم الشركة أو الشخص مطلوب.',
@@ -276,7 +293,8 @@ export const GROWTH_EN: Record<string, string> = {
   'growth.tab.channels': 'Connected channels',
   'growth.tab.results': 'Results and conversions',
 
-  'growth.stat.leads': 'Leads',
+  'growth.stat.leads': 'All records',
+  'growth.stat.potential': 'Potential (unverified)',
   'growth.stat.qualified': 'Qualified',
   'growth.stat.consented': 'Consent on file',
   'growth.stat.campaigns': 'Campaigns',
@@ -338,6 +356,10 @@ export const GROWTH_EN: Record<string, string> = {
   'growth.requires': 'Required to activate:',
   'growth.approval': 'Approval needed',
   'growth.adapterPending': 'Sending on this channel is not implemented in this build, so it is not ready to send.',
+  'growth.channelNeedsActivation': 'Needs activation by the platform team — no keys are asked from you here.',
+  'growth.metaOAuthHint':
+    'Facebook and Instagram publishing happens in “Social accounts” through your company’s OAuth connection, not with static keys here.',
+  'growth.noSendableChannel': 'No channel is ready to send yet — ask the platform team to activate one first.',
 
   'growth.leadsTitle': 'Discovered leads',
   'growth.addLead': 'Add a verified lead',
@@ -347,13 +369,20 @@ export const GROWTH_EN: Record<string, string> = {
   'growth.stage': 'Stage',
   'growth.columnLead': 'Lead',
   'growth.columnSector': 'Sector',
-  'growth.columnScore': 'Score',
+  'growth.columnScore': 'Match score',
   'growth.columnReason': 'Reason and source',
   'growth.columnStage': 'Stage',
   'growth.columnConsent': 'Consent',
   'growth.columnDate': 'Discovered',
   'growth.leadsEmpty': 'No leads yet.',
   'growth.leadsEmptyHint': 'Connect a licensed source, or add a lead with its source link.',
+  'growth.classification.potential': 'Potential — needs review',
+  'growth.classification.confirmed': 'Verified by a person',
+  'growth.classificationHint':
+    'Discovered records are stored as potential leads, not confirmed customers. Only a manual stage change or recorded consent confirms one.',
+  'growth.matchScoreLabel': 'Match with your activity',
+  'growth.osmNote':
+    'OpenStreetMap data © OpenStreetMap contributors, under the ODbL. Shown as potential companies by location and activity, and they need human review.',
   'growth.details': 'Details',
   'growth.logContact': 'Contact log',
   'growth.whyLead': 'Why this lead was suggested',
@@ -381,6 +410,7 @@ export const GROWTH_EN: Record<string, string> = {
   'growth.saveLead': 'Save lead',
 
   'growth.sourceKind.licensed_provider': 'Licensed data provider',
+  'growth.sourceKind.open_data': 'Open data (OpenStreetMap, ODbL)',
   'growth.sourceKind.manual_research': 'Documented manual research',
   'growth.sourceKind.crm_import': 'CRM import',
   'growth.sourceKind.inbound_form': 'Inbound request',
@@ -498,6 +528,14 @@ export const GROWTH_EN: Record<string, string> = {
 
   'err.lead_source_not_connected': 'The lead discovery source is not connected yet.',
   'err.lead_source_failed': 'The data source could not be reached. No lead was recorded.',
+  'err.lead_source_busy':
+    'The OpenStreetMap server is busy right now. Try again shortly; no lead was saved.',
+  'err.lead_source_timeout':
+    'The OpenStreetMap query timed out. No lead was saved; retry or use another Overpass instance.',
+  'err.lead_city_not_supported':
+    'The ideal-customer profile has no supported Saudi city. Add one (for example Riyadh or Jeddah) on the profile tab and retry.',
+  'err.lead_source_cooldown':
+    'OpenStreetMap was queried moments ago. Wait a little before the next run.',
   'err.analysis_not_approved': 'An approved site analysis is required first.',
   'err.icp_not_derivable': 'The analysis does not contain enough to build the profile.',
   'err.lead_name_required': 'A company or person name is required.',

@@ -21,11 +21,17 @@ export interface Env {
   // When set, /setup accepts only this address (case-insensitive) for the
   // first Super Admin. Never a real address in source — deployment secret.
   SETUP_ADMIN_EMAIL?: string;
-  // Lead discovery through a licensed data provider. Without all three the
+  // Lead discovery source. Either a licensed provider (all three values) or
+  // `LEAD_DATA_PROVIDER=openstreetmap`, which uses the free ODbL OpenStreetMap
+  // data through Overpass and needs no key. Without a configured source the
   // discovery endpoint refuses instead of returning invented records.
+  // `LEAD_DATA_API_URL` also overrides the Overpass endpoint (a mirror or a
+  // self-hosted instance) when the public one is busy.
   LEAD_DATA_PROVIDER?: string;
   LEAD_DATA_API_URL?: string;
   LEAD_DATA_API_KEY?: string;
+  /** Seconds between OpenStreetMap runs per company (default 15; 0 disables). */
+  LEAD_DISCOVERY_COOLDOWN_SECONDS?: string;
   // Outbound channels. Presence of credentials is not the same as permission:
   // platform settings `integration.<channel>.approved` must also be set.
   EMAIL_PROVIDER?: string;

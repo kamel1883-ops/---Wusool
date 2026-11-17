@@ -27,6 +27,13 @@ import {
   str,
 } from '../lib/db';
 import { can } from '../lib/rbac';
+import {
+  LeadSourceError,
+  OSM_ENDPOINT,
+  discoverOpenDataLeads,
+  resolveSaudiCity,
+  type SaudiCity,
+} from '../lib/openstreetmap';
 import { apiError } from './public';
 
 const app = new Hono<AppEnv>();
@@ -157,14 +164,60 @@ function channelRegistry(env: any, settings: Record<string, string>): ChannelInf
   ];
 }
 
-/** Licensed lead-data source: only usable with an endpoint + key + provider. */
+/**
+ * Client-safe view of a `requires` list. Server credentials are single-tenant
+ * deployment secrets (or legacy static tokens that must NOT be provisioned for
+ * a multi-tenant setup); only human-readable explanations cross the API.
+ * Anything shaped like an env-var name never leaves the server.
+ */
+const clientSafeRequirements = (items: unknown): string[] => {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => String(item ?? '').trim())
+    .filter((item) => item.length > 0 && !/^[A-Z][A-Z0-9_]*(\s*=.*)?$/.test(item));
+};
+
+/** Provider names that mean "use the open OpenStreetMap data, no key needed". */
+const OPEN_DATA_PROVIDERS = ['openstreetmap', 'osm', 'overpass'];
+
+/**
+ * Resolves the configured discovery source. Two kinds exist:
+ *   - licensed_data: an account, an endpoint and a key must all be present.
+ *   - open_data:     OpenStreetMap over Overpass. No key and no fee; enabling
+ *                    it is one variable, and the ODbL attribution is kept on
+ *                    every record. `LEAD_DATA_API_URL` may point at a mirror
+ *                    or a self-hosted instance when the public one is busy.
+ */
 function leadDataSource(env: any) {
-  const provider = str(env.LEAD_DATA_PROVIDER, 40);
+  const configured = str(env.LEAD_DATA_PROVIDER, 40).toLowerCase();
   const url = str(env.LEAD_DATA_API_URL, 400);
   const key = str(env.LEAD_DATA_API_KEY, 400);
+  const endpoint = isHttpUrl(url) ? url : null;
+
+  if (OPEN_DATA_PROVIDERS.includes(configured)) {
+    return {
+      provider: 'openstreetmap',
+      kind: 'open_data' as const,
+      tableKind: 'organisation_search' as const,
+      label: 'OpenStreetMap (ODbL open data)',
+      credentialRef: null as string | null,
+      endpoint: endpoint ?? OSM_ENDPOINT,
+      connected: true,
+      requires: [
+        'لا مفاتيح ولا رسوم — بيانات مفتوحة بترخيص ODbL',
+        'No key or fee — OpenStreetMap open data under ODbL',
+      ],
+    };
+  }
+
   return {
-    provider: provider || null,
-    connected: Boolean(provider && url && key && isHttpUrl(url)),
+    provider: configured || null,
+    kind: 'licensed_data' as const,
+    tableKind: 'licensed_data' as const,
+    label: 'Licensed lead-data provider',
+    credentialRef: 'LEAD_DATA_API_KEY' as string | null,
+    endpoint,
+    connected: Boolean(configured && endpoint && key),
     requires: ['LEAD_DATA_PROVIDER', 'LEAD_DATA_API_URL', 'LEAD_DATA_API_KEY'],
   };
 }
@@ -176,8 +229,17 @@ function leadDataSource(env: any) {
 type ScoreReason = { code: string; points: number; detail: string };
 
 function scoreLead(
-  input: { signal: Signal; sector?: string | null; city?: string | null; email?: string | null; phone?: string | null; consentState?: string },
-  icp: { sectors: string[]; cities: string[] }
+  input: {
+    signal: Signal;
+    sector?: string | null;
+    /** Additional spellings (tag value, Arabic label, plurals) used only for matching. */
+    sectorHints?: string[];
+    city?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    consentState?: string;
+  },
+  icp: { sectors: string[]; services: string[]; keywords: string[]; cities: string[] }
 ) {
   const reasons: ScoreReason[] = [];
   let score = 20;
@@ -193,10 +255,20 @@ function scoreLead(
   score += signalPoints[input.signal];
   reasons.push({ code: `signal.${input.signal}`, points: signalPoints[input.signal], detail: 'قوة مؤشر الاهتمام' });
 
-  const sector = (input.sector ?? '').toLowerCase();
-  if (sector && icp.sectors.some((item) => item.toLowerCase().includes(sector) || sector.includes(item.toLowerCase()))) {
+  // "Match with the client's activity": the record's sector is compared with
+  // the profile's sectors, services and keywords in both Arabic and English.
+  const wanted = [...icp.sectors, ...icp.services, ...icp.keywords]
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  const nearby = [input.sector ?? '', ...(input.sectorHints ?? [])]
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  const matchedTerm = nearby.find((term) =>
+    wanted.some((item) => item.includes(term) || term.includes(item))
+  );
+  if (matchedTerm) {
     score += 12;
-    reasons.push({ code: 'sector_match', points: 12, detail: 'قطاع مطابق لملف العميل المثالي' });
+    reasons.push({ code: 'sector_match', points: 12, detail: `نشاط مطابق لملف العميل المثالي (${matchedTerm})` });
   }
   const city = (input.city ?? '').toLowerCase();
   if (city && icp.cities.some((item) => item.toLowerCase().includes(city) || city.includes(item.toLowerCase()))) {
@@ -261,6 +333,7 @@ const serializeLead = (row: any) => ({
   interestSignal: row.interest_signal,
   score: row.score,
   scoreReasons: parseJson<ScoreReason[]>(row.score_reason_json, []),
+  classification: row.classification ?? 'potential',
   stage: row.stage,
   consentState: row.consent_state,
   consentAt: row.consent_at,
@@ -414,7 +487,9 @@ app.get('/:companyId/growth', async (c) => {
        COUNT(*) AS total,
        SUM(CASE WHEN stage IN ('qualified','contacted','replied','meeting','proposal','won') THEN 1 ELSE 0 END) AS qualified,
        SUM(CASE WHEN consent_state = 'granted' THEN 1 ELSE 0 END) AS consented,
-       SUM(CASE WHEN do_not_contact = 1 THEN 1 ELSE 0 END) AS dnc
+       SUM(CASE WHEN do_not_contact = 1 THEN 1 ELSE 0 END) AS dnc,
+       SUM(CASE WHEN classification = 'potential' THEN 1 ELSE 0 END) AS potential,
+       SUM(CASE WHEN classification = 'confirmed' THEN 1 ELSE 0 END) AS confirmed
      FROM leads WHERE company_id = ?`,
     company.id
   );
@@ -439,12 +514,28 @@ app.get('/:companyId/growth', async (c) => {
       : null,
     sources: [
       {
+        provider: 'openstreetmap',
+        kind: 'open_data',
+        label: {
+          ar: 'OpenStreetMap — بيانات أعمال مفتوحة',
+          en: 'OpenStreetMap — open business data',
+        },
+        state: source.kind === 'open_data' ? 'connected' : 'disabled',
+        requires: clientSafeRequirements(
+          source.kind === 'open_data'
+            ? ['لا مفاتيح ولا رسوم — ترخيص ODbL', 'No key, no fee — ODbL licence', '© OpenStreetMap contributors']
+            : ['LEAD_DATA_PROVIDER=openstreetmap', 'لا مفاتيح — بيانات مفتوحة ODbL', 'No key — OpenStreetMap ODbL']
+        ),
+        providerName: 'openstreetmap',
+      },
+      {
         provider: 'licensed_data',
         kind: 'licensed_data',
         label: { ar: 'مزوّد بيانات عملاء مرخّص', en: 'Licensed lead-data provider' },
-        state: source.connected ? 'connected' : 'requires_credentials',
-        requires: source.requires,
-        providerName: source.provider,
+        state: source.kind === 'licensed_data' && source.connected ? 'connected' : 'requires_credentials',
+        requires: clientSafeRequirements(['LEAD_DATA_PROVIDER', 'LEAD_DATA_API_URL', 'LEAD_DATA_API_KEY']),
+
+        providerName: source.kind === 'licensed_data' ? source.provider : null,
       },
       {
         provider: 'manual_research',
@@ -455,12 +546,17 @@ app.get('/:companyId/growth', async (c) => {
         providerName: null,
       },
     ],
-    channels: channelRegistry(c.env, settings),
+    channels: channelRegistry(c.env, settings).map((channel) => ({
+      ...channel,
+      requires: clientSafeRequirements(channel.requires),
+    })),
     stats: {
       leads: Number(counts?.total ?? 0),
       qualified: Number(counts?.qualified ?? 0),
       consented: Number(counts?.consented ?? 0),
       doNotContact: Number(counts?.dnc ?? 0),
+      potential: Number(counts?.potential ?? 0),
+      confirmed: Number(counts?.confirmed ?? 0),
       campaigns: Number(campaignCount?.total ?? 0),
       sent: Number(messageStats?.sent ?? 0),
       failed: Number(messageStats?.failed ?? 0),
@@ -614,6 +710,8 @@ type ProviderLead = {
   companyName?: string;
   jobTitle?: string;
   sector?: string;
+  sectorHints?: string[];
+  dedupeKey?: string;
   city?: string;
   country?: string;
   email?: string;
@@ -650,47 +748,91 @@ app.post('/:companyId/growth/discover', async (c) => {
   const body = await readJson<{ limit?: number }>(c);
   const limit = Math.max(1, Math.min(50, Number(body.limit ?? 20) || 20));
 
-  let payload: any;
+  let candidates: ProviderLead[] = [];
+  let targetCity: SaudiCity | null = null;
+  // Records the source returned but that did not qualify as leads.
+  let discarded = 0;
   try {
-    const response = await fetch(str(c.env.LEAD_DATA_API_URL, 400), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${str(c.env.LEAD_DATA_API_KEY, 400)}`,
-      },
-      body: JSON.stringify({
-        provider: source.provider,
-        limit,
-        icp: {
-          services: icp.services,
-          sectors: icp.sectors,
-          cities: icp.cities,
-          keywords: icp.keywords,
-          idealAudience: icp.idealAudience,
+    if (source.kind === 'open_data') {
+      // OpenStreetMap is queried inside one Saudi metro area taken from the
+      // tenant's own profile. An unsupported city is refused, never widened
+      // into a country-wide query.
+      targetCity = resolveSaudiCity(icp.cities[0] ?? '');
+      if (!targetCity) return apiError(c, 422, 'lead_city_not_supported');
+
+      // Overpass is a shared public service. One query per run is already the
+      // limit; a short per-tenant cooldown stops a repeated click from turning
+      // into repeated load. 0 disables it (used by the tests).
+      const cooldown = Math.max(0, Number(c.env.LEAD_DISCOVERY_COOLDOWN_SECONDS ?? 15) || 0);
+      if (cooldown > 0) {
+        const lastRun = await first<any>(
+          c.env,
+          "SELECT last_run_at FROM lead_sources WHERE company_id = ? AND provider = 'openstreetmap'",
+          company.id
+        );
+        const elapsed = lastRun?.last_run_at
+          ? Date.now() - Date.parse(lastRun.last_run_at)
+          : Number.POSITIVE_INFINITY;
+        if (Number.isFinite(elapsed) && elapsed < cooldown * 1000) {
+          return apiError(c, 429, 'lead_source_cooldown', {
+            retryAfterSeconds: Math.ceil((cooldown * 1000 - elapsed) / 1000),
+          });
+        }
+      }
+
+      const result = await discoverOpenDataLeads({ endpoint: source.endpoint, city: targetCity, limit });
+      candidates = result.leads;
+      discarded = result.skipped;
+    } else {
+      const response = await fetch(str(c.env.LEAD_DATA_API_URL, 400), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${str(c.env.LEAD_DATA_API_KEY, 400)}`,
         },
-      }),
-    });
-    if (!response.ok) throw new Error(`status_${response.status}`);
-    payload = await response.json();
+        body: JSON.stringify({
+          provider: source.provider,
+          limit,
+          icp: {
+            services: icp.services,
+            sectors: icp.sectors,
+            cities: icp.cities,
+            keywords: icp.keywords,
+            idealAudience: icp.idealAudience,
+          },
+        }),
+      });
+      if (!response.ok) throw new LeadSourceError('lead_source_failed', `status_${response.status}`);
+      const payload: any = await response.json();
+      candidates = Array.isArray(payload?.leads) ? payload.leads : [];
+    }
   } catch (error) {
+    const failure = error instanceof LeadSourceError ? error.code : 'lead_source_failed';
+    const status = failure === 'lead_source_busy' ? 503 : failure === 'lead_source_timeout' ? 504 : 502;
     await run(
       c.env,
       `INSERT INTO lead_sources (id, company_id, provider, kind, label, status, credential_ref, last_run_at, last_error, created_at, updated_at)
-       VALUES (?, ?, 'licensed_data', 'licensed_data', 'Licensed lead-data provider', 'not_connected', 'LEAD_DATA_API_KEY', ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(company_id, provider) DO UPDATE SET last_run_at = excluded.last_run_at, last_error = excluded.last_error, updated_at = excluded.updated_at`,
       newId('src'),
       company.id,
+      source.provider ?? 'licensed_data',
+      source.tableKind,
+      source.label,
+      // OpenStreetMap stays configured when a query fails; it is the request
+      // that failed, not the connection.
+      source.kind === 'open_data' ? 'connected' : 'not_connected',
+      source.credentialRef,
       nowIso(),
-      str((error as Error)?.message ?? 'lead_source_failed', 200),
+      str((error as Error)?.message ?? failure, 200),
       nowIso(),
       nowIso()
     );
-    return apiError(c, 502, 'lead_source_failed');
+    return apiError(c, status, failure);
   }
 
-  const candidates: ProviderLead[] = Array.isArray(payload?.leads) ? payload.leads : [];
   let inserted = 0;
-  let skipped = 0;
+  let skipped = discarded;
   const timestamp = nowIso();
 
   for (const candidate of candidates.slice(0, limit)) {
@@ -720,24 +862,37 @@ app.post('/:companyId/growth/discover', async (c) => {
     }
 
     const scored = scoreLead(
-      { signal, sector: str(candidate.sector, 120), city: str(candidate.city, 120), email: email || null, phone: phone || null },
+      {
+        signal,
+        sector: str(candidate.sector, 120),
+        sectorHints: Array.isArray(candidate.sectorHints)
+          ? candidate.sectorHints.map((hint) => str(hint, 80)).filter(Boolean).slice(0, 12)
+          : undefined,
+        city: str(candidate.city, 120),
+        email: email || null,
+        phone: phone || null,
+      },
       icp
     );
-    const dedupe = leadDedupeKey({
-      email: email || null,
-      website: str(candidate.website, 400) || null,
-      companyName: companyName || null,
-      name: name || null,
-      city: str(candidate.city, 120) || null,
-    });
+    // An open-data record keeps the identity of its element, so the same
+    // company is never inserted twice by repeated runs.
+    const dedupe =
+      str(candidate.dedupeKey, 200) ||
+      leadDedupeKey({
+        email: email || null,
+        website: str(candidate.website, 400) || null,
+        companyName: companyName || null,
+        name: name || null,
+        city: str(candidate.city, 120) || null,
+      });
 
     const result = await run(
       c.env,
       `INSERT INTO leads (id, company_id, name, company_name, job_title, sector, city, country, email, email_source,
          phone, phone_source, website, profile_url, profile_platform, source_kind, source_provider, source_url,
          evidence_text, evidence_checked_at, interest_signal, score, score_reason_json, stage, consent_state,
-         do_not_contact, discovered_at, created_by, created_at, updated_at, dedupe_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'licensed_provider', ?, ?, ?, ?, ?, ?, ?, 'new', 'unknown', 0, ?, ?, ?, ?, ?)
+         do_not_contact, discovered_at, created_by, created_at, updated_at, dedupe_key, classification)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'licensed_provider', ?, ?, ?, ?, ?, ?, ?, 'new', 'unknown', 0, ?, ?, ?, ?, ?, 'potential')
        ON CONFLICT(company_id, dedupe_key) DO NOTHING`,
       newId('lead'),
       company.id,
@@ -774,10 +929,14 @@ app.post('/:companyId/growth/discover', async (c) => {
   await run(
     c.env,
     `INSERT INTO lead_sources (id, company_id, provider, kind, label, status, credential_ref, last_run_at, last_error, created_at, updated_at)
-     VALUES (?, ?, 'licensed_data', 'licensed_data', 'Licensed lead-data provider', 'connected', 'LEAD_DATA_API_KEY', ?, NULL, ?, ?)
+     VALUES (?, ?, ?, ?, ?, 'connected', ?, ?, NULL, ?, ?)
      ON CONFLICT(company_id, provider) DO UPDATE SET status = 'connected', last_run_at = excluded.last_run_at, last_error = NULL, updated_at = excluded.updated_at`,
     newId('src'),
     company.id,
+    source.provider ?? 'licensed_data',
+    source.tableKind,
+    source.label,
+    source.credentialRef,
     timestamp,
     timestamp,
     timestamp
@@ -793,7 +952,7 @@ app.post('/:companyId/growth/discover', async (c) => {
     meta: { provider: source.provider, inserted, skipped },
   });
 
-  return c.json({ inserted, skipped, provider: source.provider });
+  return c.json({ inserted, skipped, provider: source.provider, city: targetCity?.ar ?? null });
 });
 
 // ---------------------------------------------------------------------------
@@ -881,8 +1040,9 @@ app.post('/:companyId/growth/leads', async (c) => {
       `INSERT INTO leads (id, company_id, campaign_id, name, company_name, job_title, sector, city, country,
          email, email_source, phone, phone_source, website, profile_url, profile_platform, source_kind, source_provider,
          source_url, evidence_text, evidence_checked_at, interest_signal, score, score_reason_json, stage,
-         consent_state, consent_at, do_not_contact, owner_user_id, discovered_at, created_by, created_at, updated_at, dedupe_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual_research', ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+         consent_state, consent_at, do_not_contact, owner_user_id, discovered_at, created_by, created_at, updated_at,
+         dedupe_key, classification)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual_research', ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       company.id,
       str(body.campaignId, 60) || null,
@@ -913,7 +1073,9 @@ app.post('/:companyId/growth/leads', async (c) => {
       actor.id,
       timestamp,
       timestamp,
-      dedupe
+      dedupe,
+      // Discovered or hand-entered, it is unverified until a person reviews it.
+      'potential'
     );
   } catch (error) {
     if (String((error as Error)?.message ?? '').includes('UNIQUE')) {
@@ -959,6 +1121,12 @@ app.patch('/:companyId/growth/leads/:leadId', async (c) => {
     if (!STAGES.includes(stage as any)) return apiError(c, 422, 'invalid_stage');
     updates.push('stage = ?');
     params.push(stage);
+    // A human moving the record out of `new` is the only way a lead stops
+    // being "potential"; discovery never confirms a company on its own.
+    if (stage !== 'new' && lead.classification !== 'confirmed') {
+      updates.push('classification = ?');
+      params.push('confirmed');
+    }
     await run(
       c.env,
       'INSERT INTO lead_activities (id, company_id, lead_id, kind, note, actor_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -977,6 +1145,10 @@ app.patch('/:companyId/growth/leads/:leadId', async (c) => {
     if (!CONSENT_STATES.includes(consentState as any)) return apiError(c, 422, 'invalid_consent_state');
     updates.push('consent_state = ?', 'consent_at = ?');
     params.push(consentState, consentState === 'granted' ? timestamp : null);
+    if (consentState === 'granted' && lead.classification !== 'confirmed') {
+      updates.push('classification = ?');
+      params.push('confirmed');
+    }
     await run(
       c.env,
       'INSERT INTO lead_activities (id, company_id, lead_id, kind, note, actor_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -1396,7 +1568,7 @@ async function preflight(env: any, company: any, campaign: any, settings: Record
     ready: blockers.length === 0,
     blockers,
     eligible,
-    channel: info ?? null,
+    info: info ?? null,
   };
 }
 
@@ -1411,7 +1583,14 @@ app.post('/:companyId/growth/campaigns/:campaignId/preflight', async (c) => {
   if (!campaign) return apiError(c, 404, 'campaign_not_found');
   const settings = await getSettings(c.env);
   const result = await preflight(c.env, company, campaign, settings);
-  return c.json(result);
+  return c.json({
+    ready: result.ready,
+    blockers: result.blockers,
+    eligible: result.eligible,
+    channel: result.info
+      ? { ...result.info, requires: clientSafeRequirements(result.info.requires) }
+      : null,
+  });
 });
 
 app.post('/:companyId/growth/campaigns/:campaignId/launch', async (c) => {

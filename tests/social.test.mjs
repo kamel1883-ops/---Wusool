@@ -335,6 +335,7 @@ async function main() {
     'migrations/0004_setup_codes.sql',
     'migrations/0005_concurrency.sql',
     'migrations/0006_growth.sql',
+    'migrations/0011_lead_classification.sql',
     'migrations/0007_social.sql',
     'migrations/0008_social_review.sql',
     'migrations/0009_tracking.sql',
@@ -424,20 +425,19 @@ async function main() {
 
   const byKey = Object.fromEntries(platforms.map((item) => [item.key, item]));
   check(
-    'Facebook is connectable but does not claim advanced access',
-    byKey.facebook_page?.availability === 'available' && byKey.facebook_page?.reviewPending === true,
+    'Facebook is connectable for a client without technical detail',
+    byKey.facebook_page?.availability === 'available' &&
+      byKey.facebook_page?.oauthImplemented === true,
     byKey.facebook_page
   );
   check(
-    'email reports the credentials it actually needs',
-    byKey.email?.availability === 'requires_credentials' &&
-      byKey.email?.availabilityReasons?.includes('EMAIL_API_KEY'),
+    'email stays unavailable without credentials, and says so plainly',
+    byKey.email?.availability === 'requires_credentials',
     byKey.email
   );
   check(
-    'TikTok reports the credentials it needs instead of offering a dead button',
+    'TikTok reports it is not ready instead of offering a dead button',
     byKey.tiktok_business?.availability === 'requires_credentials' &&
-      byKey.tiktok_business?.availabilityReasons?.includes('TIKTOK_CLIENT_KEY') &&
       byKey.tiktok_business?.state === 'requires_credentials',
     byKey.tiktok_business
   );
@@ -450,21 +450,37 @@ async function main() {
   check(
     'LinkedIn and X connectors exist and report their review state honestly',
     byKey.linkedin_org?.state === 'requires_app_review' &&
-      byKey.x_twitter?.state === 'requires_app_review' &&
-      byKey.linkedin_org?.capabilityStates?.publishText === 'not_implemented',
+      byKey.x_twitter?.state === 'requires_app_review',
     { linkedin: byKey.linkedin_org, x: byKey.x_twitter }
   );
+  const tenantJson = JSON.stringify(overview.data);
   check(
-    'the capability matrix is served, not hardcoded in the client',
-    byKey.instagram_business?.capabilities?.publishText === false &&
-      byKey.instagram_business?.limits?.requiresMedia === true,
-    byKey.instagram_business
+    'the client payload exposes no server secrets, env names or scopes',
+    [
+      'META_APP_ID',
+      'META_APP_SECRET',
+      'SOCIAL_TOKEN_KEY',
+      'JOBS_SECRET',
+      'EMAIL_API_KEY',
+      'GOOGLE_CLIENT_ID',
+      'TIKTOK_CLIENT_KEY',
+      'SOCIAL_GRAPH_BASE',
+      'CREATE_CONTENT',
+      'pages_manage_posts',
+      'instagram_basic',
+    ].every((secret) => !tenantJson.includes(secret)),
+    'a server-side name leaked into the client payload'
   );
   check(
-    'scheduler readiness is reported from the server secret',
-    overview.data?.setup?.scheduler?.state === 'configured' &&
-      overview.data?.setup?.scheduler?.automatic === false,
-    overview.data?.setup
+    'the client payload carries no capability matrix or review notes',
+    byKey.facebook_page?.capabilities === undefined &&
+      byKey.facebook_page?.capabilityStates === undefined &&
+      byKey.facebook_page?.limits === undefined &&
+      byKey.facebook_page?.access === undefined &&
+      byKey.facebook_page?.accountRequirement === undefined &&
+      byKey.facebook_page?.availabilityReasons === undefined &&
+      overview.data?.setup === null,
+    byKey.facebook_page
   );
   check(
     'the deployment states that platform analytics are not implemented',
@@ -475,6 +491,64 @@ async function main() {
     'an active subscription is reported on the workspace',
     overview.data?.subscription?.isActive === true,
     overview.data?.subscription
+  );
+
+  // -------------------------------------------------------------------------
+  // Integrations console (super admin only)
+  // -------------------------------------------------------------------------
+  const anonConsole = await new Client('anon').req('/api/admin/integrations');
+  check('the integrations console requires a session', anonConsole.status === 401, anonConsole.status);
+
+  const ownerConsole = await ownerA.req('/api/admin/integrations');
+  check(
+    'a company owner cannot open the integrations console',
+    ownerConsole.status === 403,
+    ownerConsole.data
+  );
+
+  const consoleData = await admin.req('/api/admin/integrations');
+  check('the super admin sees the integrations console', consoleData.status === 200, consoleData.data);
+  const secrets = consoleData.data?.secrets ?? [];
+  const secretByName = Object.fromEntries(secrets.map((item) => [item.name, item.configured]));
+  check(
+    'secret presence is reported without secret values',
+    secretByName.SOCIAL_TOKEN_KEY === true &&
+      secretByName.META_APP_ID === true &&
+      secretByName.TIKTOK_CLIENT_KEY === false,
+    secrets
+  );
+  check(
+    'no secret value ever leaves the server',
+    !JSON.stringify(consoleData.data).includes('test-app-secret') &&
+      !JSON.stringify(consoleData.data).includes(TOKEN_KEY) &&
+      !JSON.stringify(consoleData.data).includes(JOBS_SECRET),
+    'a secret value leaked into the console payload'
+  );
+  const consolePlatforms = Object.fromEntries(
+    (consoleData.data?.platforms ?? []).map((item) => [item.key, item])
+  );
+  check(
+    'the console keeps the full capability matrix and review notes',
+    consolePlatforms.instagram_business?.capabilities?.publishText === false &&
+      consolePlatforms.instagram_business?.limits?.requiresMedia === true &&
+      Array.isArray(consolePlatforms.linkedin_org?.access?.scopes),
+    consolePlatforms.instagram_business
+  );
+  check(
+    'scheduler readiness stays visible in the console',
+    consoleData.data?.scheduler?.state === 'configured' &&
+      consoleData.data?.scheduler?.automatic === false,
+    consoleData.data?.scheduler
+  );
+  check(
+    'the console reports the connection log and per-platform tokens',
+    Array.isArray(consoleData.data?.events) &&
+      Array.isArray(consoleData.data?.connectionSummary) &&
+      consoleData.data.connectionSummary.length === 12,
+    {
+      events: (consoleData.data?.events ?? []).length,
+      summary: (consoleData.data?.connectionSummary ?? []).length,
+    }
   );
 
   const tiktokStart = await ownerA.req(`${baseA}/oauth/start`, {
@@ -547,10 +621,13 @@ async function main() {
     (connection) => connection.platform === 'x_twitter'
   );
   check(
-    'both new connectors expose their account and expiry',
+    'both new connectors expose their account, never their expiry or scopes',
     linkedinConnection?.accountName === 'Acme Org' &&
-      Boolean(linkedinConnection?.expiresAt) &&
-      xConnection?.accountName === '@acme',
+      ['connected', 'expiring'].includes(linkedinConnection?.tokenStatus) &&
+      xConnection?.accountName === '@acme' &&
+      xConnection?.profileUrl === 'https://x.com/acme' &&
+      linkedinConnection?.expiresAt === undefined &&
+      linkedinConnection?.grantedScopes === undefined,
     { linkedinConnection, xConnection }
   );
   check(
@@ -690,13 +767,17 @@ async function main() {
     'a provider token appeared in the response'
   );
   check(
-    'expiry and granted scopes are exposed instead',
-    Array.isArray(fbConnection?.grantedScopes) && fbConnection.grantedScopes.length > 0,
+    'the client sees a public profile link instead of scopes and expiry',
+    fbConnection?.profileUrl === 'https://www.facebook.com/PAGE123' &&
+      fbConnection?.grantedScopes === undefined &&
+      fbConnection?.scopes === undefined &&
+      fbConnection?.expiresAt === undefined &&
+      fbConnection?.lastError === undefined,
     fbConnection
   );
 
   const igFromSameFlow = (afterConnect.data?.connections ?? []).find(
-    (c) => c.accountId === 'IG456'
+    (c) => c.platform === 'instagram_business'
   );
   check(
     'an Instagram account from the same Meta flow is stored as Instagram, not as a Page',
@@ -705,8 +786,14 @@ async function main() {
   );
   check(
     'the Page keeps its own platform',
-    fbConnection?.platform === 'facebook_page' && fbConnection?.accountId === 'PAGE123',
+    fbConnection?.platform === 'facebook_page' &&
+      fbConnection?.profileUrl === 'https://www.facebook.com/PAGE123',
     fbConnection
+  );
+  check(
+    'the Instagram account links to its public profile',
+    igFromSameFlow?.profileUrl === 'https://www.instagram.com/test_ig',
+    igFromSameFlow ?? afterConnect.data?.connections
   );
 
   const otherTenantView = await ownerB.req(baseB);
@@ -912,7 +999,7 @@ async function main() {
   });
   const withSecond = await ownerA.req(baseA);
   const fbSecond = (withSecond.data?.connections ?? []).find(
-    (connection) => connection.accountId === 'PAGE999'
+    (connection) => connection.profileUrl === 'https://www.facebook.com/PAGE999'
   );
   check('a second Page of the same platform can be connected', Boolean(fbSecond), withSecond.data?.connections);
 
@@ -992,7 +1079,7 @@ async function main() {
   );
   const afterRevoke = await ownerA.req(baseA);
   const fbAfter = (afterRevoke.data?.connections ?? []).find(
-    (c) => c.platform === 'facebook_page' && c.accountId === 'PAGE123'
+    (c) => c.platform === 'facebook_page' && c.profileUrl === 'https://www.facebook.com/PAGE123'
   );
   check(
     'the connection asks for a reconnect',
@@ -1142,16 +1229,20 @@ async function main() {
   // -------------------------------------------------------------------------
   // Capability states and provider access approvals
   // -------------------------------------------------------------------------
+  const consoleBefore = await admin.req('/api/admin/integrations');
+  const consoleByKey = Object.fromEntries(
+    (consoleBefore.data?.platforms ?? []).map((item) => [item.key, item])
+  );
   check(
     'a channel name states what the build actually does',
-    byKey.facebook_page?.state === 'requires_app_review' &&
-      byKey.facebook_page?.capabilityStates?.publishImage === 'not_implemented',
-    byKey.facebook_page
+    consoleByKey.facebook_page?.state === 'requires_app_review' &&
+      consoleByKey.facebook_page?.capabilityStates?.publishImage === 'not_implemented',
+    consoleByKey.facebook_page
   );
   check(
     'Google Business Profile publishing is reported as not implemented',
-    byKey.google_business_profile?.capabilityStates?.publishText === 'not_implemented',
-    byKey.google_business_profile?.capabilityStates
+    consoleByKey.google_business_profile?.capabilityStates?.publishText === 'not_implemented',
+    consoleByKey.google_business_profile?.capabilityStates
   );
   check(
     'a channel with no connector is not presented as available',
@@ -1176,7 +1267,8 @@ async function main() {
   });
   check('the platform admin can record a provider approval', approveAccess.status === 200, approveAccess.data);
   const afterApproval = await ownerA.req(baseA);
-  const fbApproved = (afterApproval.data?.platforms ?? []).find((p) => p.key === 'facebook_page');
+  const consoleAfter = await admin.req('/api/admin/integrations');
+  const fbApproved = (consoleAfter.data?.platforms ?? []).find((p) => p.key === 'facebook_page');
   check(
     'the recorded approval is reflected without claiming live verification',
     fbApproved?.accessApproved === true && fbApproved?.reviewPending === false &&
@@ -1261,7 +1353,11 @@ async function main() {
   check('the GA4 property is stored for the company', ga4Complete.status === 200, ga4Complete.data);
   const finalOverview = await ownerA.req(baseA);
   const ga4 = (finalOverview.data?.connections ?? []).find((c) => c.platform === 'ga4');
-  check('the GA4 connection reports its access-token expiry', Boolean(ga4?.expiresAt), ga4);
+  check(
+    'the GA4 connection is listed without token internals',
+    ['connected', 'expiring'].includes(ga4?.tokenStatus) && ga4?.expiresAt === undefined,
+    ga4
+  );
   check(
     'no Google token leaks either',
     !JSON.stringify(finalOverview.data).includes('FAKE_GOOGLE_TOKEN') &&

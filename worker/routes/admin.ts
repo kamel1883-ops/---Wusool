@@ -35,6 +35,16 @@ import { analysisLimits, startAnalysisJob } from '../lib/analysis-pipeline';
 import { aiProviderStatus } from '../lib/ai';
 import { testOpenAIConnection } from '../lib/ai/openai';
 import { testCrawlerConnection } from '../lib/crawler/test';
+import {
+  availabilityOf,
+  capabilityStatesOf,
+  PLATFORM_ORDER,
+  PLATFORMS,
+  platformStateOf,
+  publishesAnything,
+  tokenStatusOf,
+} from '../lib/social/platforms';
+import { isOauthPlatform } from '../lib/social/oauth';
 import { apiError } from './public';
 
 const app = new Hono<AppEnv>();
@@ -1495,5 +1505,110 @@ app.get('/roles', (c) =>
     })),
   })
 );
+
+/**
+ * Integrations console for the super admin only. This is the single place
+ * where provider configuration may be inspected: secret *names* and whether
+ * they are set, per-platform OAuth requirements, review notes, token status
+ * and expiry, and the connection log. Secret *values* are never returned —
+ * presence is the only fact the console needs.
+ */
+app.get('/integrations', async (c) => {
+  const env = c.env as any;
+  const settings = await getSettings(c.env);
+
+  const secretStatus = (names: string[]) =>
+    names.map((name) => ({ name, configured: Boolean(env[name]) }));
+
+  const platforms = PLATFORM_ORDER.map((key) => {
+    const spec = PLATFORMS[key];
+    const availability = availabilityOf(key, env, settings);
+    return {
+      key,
+      name: spec.name,
+      category: spec.category,
+      connector: spec.connector,
+      oauthImplemented: isOauthPlatform(key),
+      publishable: publishesAnything(key),
+      state: platformStateOf(key, env, settings),
+      capabilities: spec.capabilities,
+      capabilityStates: capabilityStatesOf(key),
+      availability: availability.state,
+      availabilityReasons: availability.reasons,
+      accessApproved: availability.accessApproved,
+      reviewPending: availability.reviewPending,
+      access: spec.access,
+      limits: spec.limits,
+    };
+  });
+
+  const connectionRows = await all<any>(
+    c.env,
+    `SELECT platform, token_status, expires_at FROM social_connections`
+  );
+  const connectionSummary = PLATFORM_ORDER.map((key) => {
+    const rows = connectionRows.filter((row) => row.platform === key);
+    const live = rows.filter((row) => tokenStatusOf(row) === 'connected').length;
+    const needsReconnect = rows.filter((row) =>
+      ['requires_reconnect', 'expired'].includes(tokenStatusOf(row))
+    ).length;
+    const expiries = rows
+      .map((row) => row.expires_at)
+      .filter(Boolean)
+      .sort();
+    return {
+      platform: key,
+      total: rows.length,
+      connected: live,
+      needsReconnect,
+      soonestExpiry: expiries[0] ?? null,
+    };
+  });
+
+  const events = await all<any>(
+    c.env,
+    `SELECT e.kind, e.detail, e.company_id, c.name AS company_name, e.created_at
+       FROM social_events e LEFT JOIN companies c ON c.id = e.company_id
+      WHERE e.kind LIKE 'oauth.%' OR e.kind LIKE 'connection.%'
+      ORDER BY e.created_at DESC LIMIT 50`
+  );
+
+  return c.json({
+    secrets: [
+      ...secretStatus([
+        'SOCIAL_TOKEN_KEY',
+        'META_APP_ID',
+        'META_APP_SECRET',
+        'GOOGLE_CLIENT_ID',
+        'GOOGLE_CLIENT_SECRET',
+        'LINKEDIN_CLIENT_ID',
+        'LINKEDIN_CLIENT_SECRET',
+        'X_CLIENT_ID',
+        'X_CLIENT_SECRET',
+        'TIKTOK_CLIENT_KEY',
+        'TIKTOK_CLIENT_SECRET',
+        'SNAPCHAT_CLIENT_ID',
+        'SNAPCHAT_CLIENT_SECRET',
+      ]),
+      ...secretStatus(['EMAIL_PROVIDER', 'EMAIL_API_KEY', 'EMAIL_FROM', 'JOBS_SECRET']),
+    ],
+    oauthRedirectUri:
+      str(env.SOCIAL_OAUTH_REDIRECT_URI, 500) || '(defaults to <origin>/api/social/oauth/callback)',
+    platforms,
+    connectionSummary,
+    events: events.map((row) => ({
+      kind: row.kind,
+      detail: row.detail,
+      companyId: row.company_id,
+      companyName: row.company_name,
+      createdAt: row.created_at,
+    })),
+    scheduler: {
+      state: Boolean(env.JOBS_SECRET) ? 'configured' : 'blocked_by_hosting',
+      execution: 'manual_or_external',
+      automatic: false,
+    },
+  });
+});
 
 export default app;

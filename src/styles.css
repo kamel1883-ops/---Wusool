@@ -3901,6 +3901,64 @@ html {
   margin: 12px 0;
 }
 
+.social-connect-list {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.social-connect-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.social-connect-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.social-connect-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.social-connect-head p {
+  margin: 4px 0 0;
+}
+
+.social-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex: none;
+}
+
+.social-connect-accounts {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.social-connect-accounts > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
 .social-connection {
   padding: 14px;
   border: 1px solid var(--line);

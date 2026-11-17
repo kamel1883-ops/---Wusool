@@ -71,6 +71,8 @@ type Overview = {
     qualified: number;
     consented: number;
     doNotContact: number;
+    potential: number;
+    confirmed: number;
     campaigns: number;
     sent: number;
     failed: number;
@@ -99,6 +101,7 @@ type Lead = {
   interestSignal: string;
   score: number;
   scoreReasons: Array<{ code: string; points: number; detail: string }>;
+  classification: 'potential' | 'confirmed';
   stage: string;
   consentState: string;
   doNotContact: boolean;
@@ -125,8 +128,6 @@ type Blocker = { code: string; count?: number };
 
 const STAGES = ['new', 'qualified', 'contacted', 'replied', 'meeting', 'proposal', 'won', 'lost'];
 const SIGNALS = ['search_intent', 'public_request', 'public_question', 'company_fit', 'inbound'];
-const CHANNELS = ['email', 'whatsapp', 'meta', 'linkedin'];
-
 const label = (value: string, t: (key: string) => string) => t(`growth.enum.${value}`);
 
 function StateChip({ state, t }: { state: string; t: (key: string) => string }) {
@@ -175,7 +176,7 @@ export function CompanyGrowthPage() {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await api<{ inserted: number; skipped: number }>(
+      const result = await api<{ inserted: number; skipped: number; city?: string | null }>(
         `/api/company/${companyId}/growth/discover`,
         { method: 'POST', body: { limit: 20 } }
       );
@@ -244,6 +245,7 @@ export function CompanyGrowthPage() {
 
       <div className="growth-stats">
         <Stat label={t('growth.stat.leads')} value={String(data.stats.leads)} />
+        <Stat label={t('growth.stat.potential')} value={String(data.stats.potential ?? 0)} />
         <Stat label={t('growth.stat.qualified')} value={String(data.stats.qualified)} />
         <Stat label={t('growth.stat.consented')} value={String(data.stats.consented)} />
         <Stat label={t('growth.stat.campaigns')} value={String(data.stats.campaigns)} />
@@ -509,7 +511,9 @@ function SourcesPanel({
                   {t('growth.provider')}: <span dir="ltr">{source.providerName}</span>
                 </p>
               ) : null}
-              <p className="muted small">{source.requires.join(' · ')}</p>
+              {source.requires && source.requires.length > 0 ? (
+                <p className="muted small">{source.requires.join(' · ')}</p>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -545,10 +549,12 @@ function ChannelsPanel({
               <strong>{locale === 'ar' ? channel.label.ar : channel.label.en}</strong>
               <StateChip state={channel.state} t={t} />
             </div>
-            <p className="muted small">{t('growth.requires')}</p>
-            <code className="growth-secret-list" dir="ltr">
-              {channel.requires.join('\n')}
-            </code>
+            {channel.state === 'requires_credentials' ? (
+              <p className="muted small">{t('growth.channelNeedsActivation')}</p>
+            ) : null}
+            {channel.channel === 'meta' ? (
+              <p className="muted small">{t('growth.metaOAuthHint')}</p>
+            ) : null}
             {channel.approval ? (
               <p className="muted small">
                 {t('growth.approval')}: {locale === 'ar' ? channel.approval.ar : channel.approval.en}
@@ -621,6 +627,8 @@ function LeadsPanel({
 
   const rows = leads.data?.leads ?? [];
 
+  const openDataSource = rows.some((lead) => lead.sourceProvider === 'openstreetmap');
+
   return (
     <div className="growth-stack">
       <Card
@@ -652,6 +660,8 @@ function LeadsPanel({
 
         {error ? <Alert tone="danger">{error}</Alert> : null}
         {leads.error ? <Alert tone="danger">{t(errorKey(leads.error))}</Alert> : null}
+        <p className="muted small">{t('growth.classificationHint')}</p>
+        {openDataSource ? <Alert tone="info">{t('growth.osmNote')}</Alert> : null}
         {leads.loading ? (
           <Loading />
         ) : !rows.length ? (
@@ -677,6 +687,16 @@ function LeadsPanel({
               <tr key={lead.id} className={expanded === lead.id ? 'row-open' : undefined}>
                 <td>
                   <strong>{lead.companyName || lead.name}</strong>
+                  <div>
+                    <span
+                      className={cx(
+                        'badge',
+                        lead.classification === 'confirmed' ? 'badge-ok' : 'badge-muted'
+                      )}
+                    >
+                      {t(`growth.classification.${lead.classification}`)}
+                    </span>
+                  </div>
                   {lead.name && lead.companyName ? <div className="muted small">{lead.name}</div> : null}
                   {lead.email ? (
                     <div className="muted small" dir="ltr">
@@ -840,8 +860,17 @@ function LeadDetails({
           ))}
         </ul>
         <p className="muted small">
-          {t('growth.sourceKind')}: {t(`growth.sourceKind.${lead.sourceKind}`)}
+          {t('growth.sourceKind')}:{' '}
+          {t(
+            lead.sourceProvider === 'openstreetmap'
+              ? 'growth.sourceKind.open_data'
+              : `growth.sourceKind.${lead.sourceKind}`
+          )}
           {lead.sourceProvider ? ` · ${lead.sourceProvider}` : ''}
+        </p>
+        <p className="muted small">
+          {t('growth.matchScoreLabel')}: {lead.score}/100 ·{' '}
+          {t(`growth.classification.${lead.classification}`)}
         </p>
         <p className="muted small">
           {t('growth.signal')}: {label(lead.interestSignal, t)}
@@ -1362,7 +1391,15 @@ function CampaignFormModal({
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/company/${companyId}/growth/campaigns`, { method: 'POST', body: form });
+      if (!effectiveChannel) {
+        setError(t('growth.noSendableChannel'));
+        setBusy(false);
+        return;
+      }
+      await api(`/api/company/${companyId}/growth/campaigns`, {
+        method: 'POST',
+        body: { ...form, channel: effectiveChannel },
+      });
       onSaved();
     } catch (err) {
       setError(t(errorKey((err as ApiError).code)));
@@ -1371,7 +1408,11 @@ function CampaignFormModal({
     }
   };
 
-  const selected = channels.find((channel) => channel.channel === form.channel);
+  const sendable = channels.filter((channel) => channel.canSendFromThisBuild);
+  const effectiveChannel = sendable.some((channel) => channel.channel === form.channel)
+    ? form.channel
+    : (sendable[0]?.channel ?? '');
+  const selected = channels.find((channel) => channel.channel === effectiveChannel);
 
   return (
     <Modal open title={t('growth.newCampaign')} onClose={onClose}>
@@ -1413,14 +1454,15 @@ function CampaignFormModal({
           </Field>
         </div>
         <Field label={t('growth.channel')} htmlFor="campaign-channel">
-          <Select id="campaign-channel" value={form.channel} onChange={(event) => setForm({ ...form, channel: event.target.value })}>
-            {CHANNELS.map((item) => (
-              <option key={item} value={item}>
-                {t(`growth.enum.${item}`)}
+          <Select id="campaign-channel" value={effectiveChannel} onChange={(event) => setForm({ ...form, channel: event.target.value })}>
+            {sendable.map((channel) => (
+              <option key={channel.channel} value={channel.channel}>
+                {t(`growth.enum.${channel.channel}`)}
               </option>
             ))}
           </Select>
         </Field>
+        {sendable.length === 0 ? <Alert tone="warn">{t('growth.noSendableChannel')}</Alert> : null}
         {selected ? (
           <Alert tone={selected.state === 'connected' ? 'ok' : 'warn'}>
             {t('growth.channelState')}: {t(`growth.state.${selected.state}`)}
@@ -1463,7 +1505,7 @@ function CampaignFormModal({
           </Field>
         </div>
         <p className="muted small">{locale === 'ar' ? 'لن يُرسل شيء قبل اجتياز فحص الجاهزية.' : 'Nothing is sent before the readiness check passes.'}</p>
-        <Button type="submit" loading={busy}>
+        <Button type="submit" loading={busy} disabled={!effectiveChannel}>
           {t('growth.createCampaign')}
         </Button>
       </form>

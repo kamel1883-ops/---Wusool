@@ -14,7 +14,7 @@
 | ٤ — المكتبة والنسخ | منفّذ | نسخة لكل تعديل، رفض/طلب تعديلات بسبب، استرجاع ينشئ مسودة جديدة، منع تعديل المنشور المنشور | — |
 | ٥ — النشر الفوري | منفّذ لـ Meta | نشر فوري متعدد الأهداف، `partially_published`، إعادة المحاولة للفاشل فقط، منع التكرار | TikTok/Snapchat/LinkedIn/X/GBP = `publish_not_implemented` |
 | ٦ — الجدولة والطابور | منفّذ جزئيًا | جدول دائم، مهمة واحدة لكل هدف، Backoff، إلغاء، سجل محاولات، `POST /api/internal/social/tick` بـ`JOBS_SECRET` | لا Cron على Sites → `blocked_by_hosting` معلنة |
-| ٧ — اكتشاف العملاء | منفّذ سابقًا | إدخال يدوي موثّق، مزوّد مرخّص كطبقة إعداد، منع Lead بلا مصدر، قائمة عدم التواصل | لا مزوّد بيانات حقيقي مربوط (يحتاج عقدًا ومفاتيح) |
+| ٧ — اكتشاف العملاء | منفّذ | إدخال يدوي موثّق، مزوّد مرخّص كطبقة إعداد، **OpenStreetMap كمصدر مفتوح مجاني** (`LEAD_DATA_PROVIDER=openstreetmap`، Overpass، استعلام واحد محدّد بنطاق مدينة سعودية، محاولة واحدة على نسخة بديلة عند انشغال الخدمة العامة، فاصل زمني ١٥ ثانية لكل شركة، إسناد ODbL)، **كل ناتج يُحفظ `classification=potential`** بدرجة تطابق مفسّرة مع نشاط العميل، ولا يصبح `confirmed` إلا بفعل بشري، منع Lead بلا مصدر، قائمة عدم التواصل | مزوّد تجاري مرخّص (يحتاج عقدًا ومفاتيح)؛ Instances العامة قد تكون مشغولة (يظهر `lead_source_busy`) |
 | ٨ — CRM | منفّذ سابقًا | مراحل، أنشطة، موافقة، منع التواصل، ملكية، حملات وقياس يدوي | إرسال فعلي يحتاج قناة مفعّلة وموافقة |
 | ٩ — القياس الداخلي | منفّذ | روابط UTM، Redirect `/t/:code`، بيكين أحداث، نقرات WhatsApp/اتصال/نماذج، ربط الحملة والمنشور، تجزئة زائر مملّحة | مشاهدات/وصول المنصات = `not_implemented` |
 | ١٠ — لوحة النتائج | منفّذ | لوحة أداء بمصدر لكل رقم، و`Unavailable` لما لا مصدر له، CPL/ROI عند توفر spend فقط | أفضل منشور/جمهور يحتاج insights |
@@ -22,7 +22,7 @@
 | ١٢ — البوسترات | منفّذ | قوالب + ٦ مقاسات + SVG على الخادم + Draft→Approved→Public + منع تعديل المعتمد | لا رفع صور/خطوط مخصّصة |
 | ١٣ — الإعلانات المدفوعة | منفّذ كعنصر نائب | صفحة `Paid Advertising — Future Module` بحالة `not_implemented`، بلا أي زر دفع | وحدة كاملة تحتاج حسابات إعلانية وميزانية وموافقة |
 | ١٤ — الأمان والعزل | منفّذ | عزل بالعضوية، CSRF + Origin، رموز AES-GCM، OAuth state أحادي، Rate limit للدخول والبيكين، Audit، إبطال جلسات التعليق، 402 للاشتراك | مراجعة اختراق خارجية غير مُنفّذة |
-| ١٥ — الاختبارات | منفّذ | ٣٢٧ فحصًا: ٦٧ + ٤٢ + ٢٨ + ٣٤ + ١٠٦ + ٣١ + ١٩ | لا اختبار متصفح/E2E آلي |
+| ١٥ — الاختبارات | منفّذ | ٤١٢ فحصًا: ٦٧ + ٤٢ + ٢٨ + ٤١ + ١١٥ + ٦٩ + ٣١ + ١٩ | لا اختبار متصفح/E2E آلي |
 
 ## ٢. الجداول الجديدة
 
@@ -71,7 +71,9 @@
 `SOCIAL_TOKEN_KEY`, `JOBS_SECRET`, `TRACKING_SALT`,
 `META_APP_ID/SECRET`, `GOOGLE_CLIENT_ID/SECRET`, `LINKEDIN_CLIENT_ID/SECRET`,
 `X_CLIENT_ID/SECRET`, `TIKTOK_CLIENT_KEY/SECRET`, `SNAPCHAT_CLIENT_ID/SECRET`,
-`EMAIL_PROVIDER/API_KEY/FROM`, `LEAD_DATA_PROVIDER/API_URL/API_KEY`,
+`EMAIL_PROVIDER/API_KEY/FROM`, `LEAD_DATA_PROVIDER/API_URL/API_KEY`
+(أو `LEAD_DATA_PROVIDER=openstreetmap` بلا أي مفتاح، و`LEAD_DATA_API_URL` اختياري لتوجيه Overpass
+إلى مرآة أو نسخة داخلية),
 `OWNER_RESET_SECRET` (اختياري: يفعّل `/reset-owner` لمرة واحدة عند نسيان كلمة مرور المالك).
 
 رابط العودة في كل مزوّد هو **رابط واحد للمنصة**: `/api/social/oauth/callback`
@@ -93,5 +95,5 @@
 npm ci
 npm run check      # tsc للواجهة والـWorker
 npm run build      # vite build
-npm test           # ٣٢٧ فحصًا على Worker حقيقي وD1 محلي (بعد npm run build)
+npm test           # ٤١٢ فحصًا على Worker حقيقي وD1 محلي (بعد npm run build)
 ```

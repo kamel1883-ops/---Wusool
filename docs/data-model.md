@@ -133,7 +133,7 @@
 | --- | --- |
 | `company_icp` | ملف العميل المثالي: خدمات، قطاعات، مدن، كلمات، مشكلات، جمهور، عرض، وأدلة كل بند + `analysis_id` |
 | `lead_sources` | حالة مصادر الاكتشاف لكل شركة (لا تُستنتج من الواجهة) |
-| `leads` | عميل محتمل بدليل: `source_url` إلزامي، `evidence_text` إلزامي، `interest_signal`، `score` + `score_reason_json`، مصدر البريد/الهاتف، `consent_state`، `do_not_contact`، `campaign_id`، `dedupe_key` فريد لكل شركة |
+| `leads` | عميل محتمل بدليل: `source_url` إلزامي، `evidence_text` إلزامي، `interest_signal`، `score` + `score_reason_json`، `classification` (`potential` افتراضيًا ولا يصبح `confirmed` إلا بفعل بشري)، مصدر البريد/الهاتف، `consent_state`، `do_not_contact`، `campaign_id`، `dedupe_key` فريد لكل شركة |
 | `lead_activities` | سجل التواصل (note/email/call/whatsapp/meeting/proposal/stage_change/consent) |
 | `suppressions` | قائمة عدم التواصل لكل قناة |
 | `campaigns` | حملة: هدف، جمهور، قطاع، مدينة، قناة، محتوى معتمد، ميزانية، حالة محسوبة |
@@ -142,7 +142,8 @@
 | `campaign_metrics` | نتائج كل فترة (يدوية، `source='manual'`) |
 
 > قيود مقصودة: لا `leads` بدون `source_url`/`evidence_text`، ولا بريد/هاتف بدون `email_source`/`phone_source`،
-> ولا سجل `sent` إلا بعد استجابة مزوّد حقيقي.
+> ولا سجل `sent` إلا بعد استجابة مزوّد حقيقي، وكل ما يأتي من الاكتشاف (OpenStreetMap أو مزوّد)
+> يُحفظ `classification = 'potential'` مع `stage = 'new'`؛ التأهيل قرار بشري.
 
 ## ٢. الجداول المخططة (لا تُنشأ قبل مرحلتها)
 

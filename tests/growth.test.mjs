@@ -154,6 +154,7 @@ async function main() {
     'migrations/0004_setup_codes.sql',
     'migrations/0005_concurrency.sql',
     'migrations/0006_growth.sql',
+    'migrations/0011_lead_classification.sql',
   ]) {
     migrate(file);
   }
@@ -214,6 +215,27 @@ async function main() {
     'no channel claims to be connected',
     (overview.data?.channels ?? []).every((channel) => channel.state !== 'connected'),
     overview.data?.channels
+  );
+  const secretLike = (value) => /^[A-Z][A-Z0-9_]*(\s*=.*)?$/.test(String(value ?? ''));
+  check(
+    'no deployment secret name reaches the client in channel requirements',
+    (overview.data?.channels ?? []).every((channel) =>
+      (channel.requires ?? []).every((item) => !secretLike(item))
+    ),
+    overview.data?.channels
+  );
+  check(
+    'no deployment secret name reaches the client in source requirements',
+    (overview.data?.sources ?? []).every((source) =>
+      (source.requires ?? []).every((item) => !secretLike(item))
+    ),
+    overview.data?.sources
+  );
+  const metaChannel = (overview.data?.channels ?? []).find((channel) => channel.channel === 'meta');
+  check(
+    'the legacy static-token channel cannot send in this build',
+    metaChannel?.canSendFromThisBuild === false,
+    metaChannel
   );
 
   const discovery = await owner.req(`${base}/discover`, { method: 'POST', body: { limit: 5 } });
@@ -302,6 +324,11 @@ async function main() {
     'the lead carries a score with explicit reasons',
     createdLead.data?.lead?.score > 0 && (createdLead.data?.lead?.scoreReasons ?? []).length > 0,
     createdLead.data?.lead
+  );
+  check(
+    'a hand-entered lead is also stored as potential, not confirmed',
+    createdLead.data?.lead?.classification === 'potential',
+    createdLead.data?.lead?.classification
   );
   check(
     'the lead keeps its evidence and source',
@@ -402,6 +429,24 @@ async function main() {
     'launch is refused with the blocker list',
     launch.status === 409 && launch.data?.error?.code === 'campaign_not_ready',
     launch.data
+  );
+
+  const metaCampaign = await owner.req(`${base}/campaigns`, {
+    method: 'POST',
+    body: { name: 'حملة سوشيال قديمة', channel: 'meta', contentRef: 'رابط منشور معتمد' },
+  });
+  const metaId = metaCampaign.data?.campaign?.id;
+  check('a legacy-channel campaign is still accepted for migration', metaCampaign.status === 201, metaCampaign.data);
+  const metaPreflight = await owner.req(`${base}/campaigns/${metaId}/preflight`, { method: 'POST' });
+  check(
+    'a legacy static-token channel can never report ready',
+    metaPreflight.data?.ready === false,
+    metaPreflight.data
+  );
+  check(
+    'the preflight channel snapshot carries no secret names either',
+    (metaPreflight.data?.channel?.requires ?? []).every((item) => !secretLike(item)),
+    metaPreflight.data?.channel
   );
 
   const metricsBefore = await owner.req(`${base}/metrics`);

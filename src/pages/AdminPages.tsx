@@ -61,6 +61,7 @@ export function AdminLayout() {
       { to: '/admin/usage', label: t('nav.usage'), icon: 'chart' },
       { to: '/admin/audit', label: t('nav.audit'), icon: 'file' },
       { to: '/admin/settings', label: t('nav.platformSettings'), icon: 'settings' },
+      { to: '/admin/integrations', label: t('nav.integrations'), icon: 'layers' },
     ],
     [t]
   );
@@ -2817,6 +2818,156 @@ export function AdminOrdersPage() {
           <Textarea rows={3} value={rejectNote} onChange={(event) => setRejectNote(event.target.value)} />
         </Field>
       </Modal>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Integration settings (super admin only)
+// ---------------------------------------------------------------------------
+
+type IntegrationsData = {
+  secrets: Array<{ name: string; configured: boolean }>;
+  oauthRedirectUri: string;
+  platforms: Array<{
+    key: string;
+    name: { ar: string; en: string };
+    category: string;
+    connector: string;
+    oauthImplemented: boolean;
+    publishable: boolean;
+    state: string;
+    capabilityStates: Record<string, string>;
+    availability: string;
+    availabilityReasons: string[];
+    accessApproved: boolean;
+    reviewPending: boolean;
+    access: { reviewRequired: boolean; reviewNote: { ar: string; en: string }; scopes: string[] };
+    limits: { textMax: number; requiresMedia: boolean; hashtagsMax: number | null };
+  }>;
+  connectionSummary: Array<{
+    platform: string;
+    total: number;
+    connected: number;
+    needsReconnect: number;
+    soonestExpiry: string | null;
+  }>;
+  events: Array<{
+    kind: string;
+    detail: string | null;
+    companyId: string;
+    companyName: string | null;
+    createdAt: string;
+  }>;
+  scheduler: { state: string; execution: string; automatic: boolean };
+};
+
+export function AdminIntegrationsPage() {
+  const { t, locale } = useSession();
+  const { data, loading } = useApi<IntegrationsData>('/api/admin/integrations');
+  if (loading || !data) return <Loading />;
+
+  return (
+    <>
+      <PageHeader title={t('admin.integrationsTitle')} subtitle={t('admin.integrationsSubtitle')} />
+
+      <Card title={t('admin.intSecrets')}>
+        <Table head={[t('admin.intSecretName'), t('common.status')]}>
+          {data.secrets.map((secret) => (
+            <tr key={secret.name}>
+              <td dir="ltr">
+                <code>{secret.name}</code>
+              </td>
+              <td>
+                <span className={secret.configured ? 'badge badge-ok' : 'badge badge-warn'}>
+                  {secret.configured ? t('admin.intConfigured') : t('admin.intMissing')}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <p className="muted small">
+          {t('admin.intRedirectUri')}: <code dir="ltr">{data.oauthRedirectUri}</code>
+        </p>
+      </Card>
+
+      <Card title={t('admin.intPlatforms')}>
+        <Table
+          head={[
+            t('admin.intPlatform'),
+            t('admin.intConnector'),
+            t('admin.intOauth'),
+            t('admin.intState'),
+            t('admin.intAvailability'),
+            t('admin.intReasons'),
+            t('admin.intScopes'),
+            t('admin.intReview'),
+          ]}
+        >
+          {data.platforms.map((platform) => (
+            <tr key={platform.key}>
+              <td>{platform.name[locale]}</td>
+              <td dir="ltr">{platform.connector}</td>
+              <td>{platform.oauthImplemented ? t('common.yes') : t('common.no')}</td>
+              <td dir="ltr">{platform.state}</td>
+              <td dir="ltr">{platform.availability}</td>
+              <td dir="ltr">{platform.availabilityReasons.join(' · ') || '—'}</td>
+              <td dir="ltr">{platform.access.scopes.join(' · ') || '—'}</td>
+              <td>
+                {platform.access.reviewRequired
+                  ? platform.access.reviewNote[locale]
+                  : t('common.no')}
+              </td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+
+      <Card title={t('admin.intConnections')}>
+        <Table
+          head={[
+            t('admin.intPlatform'),
+            t('admin.intTotal'),
+            t('admin.intConnected'),
+            t('admin.intNeedsReconnect'),
+            t('admin.intSoonestExpiry'),
+          ]}
+        >
+          {data.connectionSummary.map((row) => (
+            <tr key={row.platform}>
+              <td dir="ltr">{row.platform}</td>
+              <td>{row.total}</td>
+              <td>{row.connected}</td>
+              <td>{row.needsReconnect}</td>
+              <td>{row.soonestExpiry ? formatDateTime(row.soonestExpiry, locale) : '—'}</td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+
+      <Card title={t('admin.intScheduler')}>
+        <p className="muted small" dir="ltr">
+          {data.scheduler.state} · {data.scheduler.execution} · automatic:{' '}
+          {String(data.scheduler.automatic)}
+        </p>
+      </Card>
+
+      <Card title={t('admin.intEvents')}>
+        {data.events.length === 0 ? (
+          <EmptyState>{t('common.noData')}</EmptyState>
+        ) : (
+          <ul className="social-events">
+            {data.events.map((event, index) => (
+              <li key={`${event.createdAt}-${index}`}>
+                <span className="badge badge-muted" dir="ltr">{event.kind}</span>
+                <span className="muted small">{event.companyName ?? event.companyId}</span>
+                <span className="muted small" dir="auto">{event.detail ?? ''}</span>
+                <time className="muted small">{formatDateTime(event.createdAt, locale)}</time>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </>
   );
 }

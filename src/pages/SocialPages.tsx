@@ -33,38 +33,39 @@ type PlatformInfo = {
   key: string;
   name: { ar: string; en: string };
   category: string;
-  connector: string;
-  accountRequirement: { ar: string; en: string };
-  capabilities: Record<string, boolean>;
-  access: { reviewRequired: boolean; reviewNote: { ar: string; en: string }; scopes: string[] };
-  limits: { textMax: number; requiresMedia: boolean; hashtagsMax: number | null };
+  connector?: string;
+  accountRequirement?: { ar: string; en: string };
+  capabilities?: Record<string, boolean>;
+  access?: { reviewRequired: boolean; reviewNote?: { ar: string; en: string }; scopes?: string[] };
+  limits?: { textMax: number; requiresMedia: boolean; hashtagsMax: number | null };
   publishable: boolean;
   oauthImplemented: boolean;
   /** What this build actually does with the channel. */
   state: string;
-  capabilityStates: Record<string, string>;
+  capabilityStates?: Record<string, string>;
   availability: 'available' | 'requires_credentials' | 'pending_review' | 'not_supported';
-  availabilityReasons: string[];
-  accessApproved: boolean;
-  reviewPending: boolean;
+  availabilityReasons?: string[];
+  accessApproved?: boolean;
+  reviewPending?: boolean;
   connections: Connection[];
 };
 
 type Connection = {
   id: string;
   platform: string;
-  accountId: string;
+  accountId?: string;
   pageId: string | null;
   profileId: string | null;
   accountName: string;
   accountType: string | null;
   tokenStatus: 'connected' | 'expiring' | 'expired' | 'requires_reconnect';
-  scopes: string[];
-  grantedScopes: string[];
+  scopes?: string[];
+  grantedScopes?: string[];
   connectedAt: string;
-  expiresAt: string | null;
-  lastSyncAt: string | null;
-  lastError: string | null;
+  expiresAt?: string | null;
+  lastSyncAt?: string | null;
+  lastError?: string | null;
+  profileUrl?: string | null;
 };
 
 type Overview = {
@@ -72,11 +73,11 @@ type Overview = {
   connections: Connection[];
   setup: {
     tokenKeyConfigured: boolean;
-    meta: { configured: boolean; requires: string[] };
-    google: { configured: boolean; requires: string[] };
-    email: { configured: boolean; requires: string[] };
-    scheduler: { state: string; execution: string; automatic: boolean };
-  };
+    meta: { configured: boolean; requires?: string[] };
+    google: { configured: boolean; requires?: string[] };
+    email: { configured: boolean; requires?: string[] };
+    scheduler: { state: string; execution: string; automatic: boolean } | null;
+  } | null;
   analytics: { state: string; note: string };
   subscription: { status: string; isActive: boolean; daysLeft: number | null };
   stats: {
@@ -230,7 +231,7 @@ export function CompanySocialPage() {
     } else if (oauth === 'denied') {
       setNotice({ tone: 'warn', text: t('social.oauthDenied') });
     } else {
-      setNotice({ tone: 'danger', text: `${t('social.oauthFailed')}${t(errorKey(`oauth_state_${oauth}`))}` });
+      setNotice({ tone: 'danger', text: t('social.connectFailed') });
     }
     window.history.replaceState({}, '', window.location.pathname);
   }, [base, t]);
@@ -248,7 +249,8 @@ export function CompanySocialPage() {
       });
       window.location.assign(data.authorizeUrl);
     } catch (error) {
-      setNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+      // Clients see one friendly line, never a server code.
+      setNotice({ tone: 'danger', text: t('social.connectFailed') });
       setBusy(null);
     }
   };
@@ -262,10 +264,11 @@ export function CompanySocialPage() {
         body: { state: pending.state, accountIds: pending.chosen },
       });
       setPending(null);
-      setNotice({ tone: 'ok', text: t('social.saved') });
+      setNotice({ tone: 'ok', text: t('social.connectedOk') });
+      setTab('accounts');
       await load();
     } catch (error) {
-      setNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+      setNotice({ tone: 'danger', text: t('social.connectFailed') });
     } finally {
       setBusy(null);
     }
@@ -280,21 +283,6 @@ export function CompanySocialPage() {
       await load();
     } catch (error) {
       setNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const verify = async (connection: Connection) => {
-    if (!base) return;
-    setBusy(connection.id);
-    try {
-      await api(`${base}/connections/${connection.id}/verify`, { method: 'POST' });
-      setNotice({ tone: 'ok', text: t('social.saved') });
-      await load();
-    } catch (error) {
-      setNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
-      await load();
     } finally {
       setBusy(null);
     }
@@ -387,14 +375,13 @@ export function CompanySocialPage() {
       <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
       {tab === 'accounts' ? (
-        <AccountsTab
+        <ConnectAccountsTab
           overview={overview}
           locale={locale}
           t={t}
           busy={busy}
           onConnect={startOauth}
           onDisconnect={disconnect}
-          onVerify={verify}
         />
       ) : null}
 
@@ -430,7 +417,7 @@ export function CompanySocialPage() {
           events={events}
           locale={locale}
           t={t}
-          scheduler={overview.setup.scheduler}
+          scheduler={overview.setup?.scheduler ?? null}
           busy={busy}
           onRun={runDue}
         />
@@ -567,10 +554,11 @@ export function CompanySocialPage() {
                 />
                 <span>
                   <strong>{account.accountName}</strong>
-                  <span className="muted small" dir="ltr">
-                    {account.accountType}
-                    {account.pageId ? ` · page ${account.pageId}` : ''}
-                  </span>
+                  {account.pageId ? (
+                    <span className="muted small">
+                      {' '}· {t('social.pageLabel')}: <span dir="ltr">{account.pageId}</span>
+                    </span>
+                  ) : null}
                 </span>
               </label>
             ))}
@@ -582,17 +570,83 @@ export function CompanySocialPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Accounts
+// Accounts — one simple card per platform for the company owner.
+//
+// This screen never shows secrets, env-var names, scopes or raw provider
+// errors. Every card answers one question: is the platform linked, and what
+// is the single next step. The full technical picture lives in the
+// super-admin "Integration settings" console.
 // ---------------------------------------------------------------------------
 
-function AccountsTab({
+/** The six consumer platforms a company owner can link. */
+const LINKABLE_PLATFORMS = [
+  'facebook_page',
+  'instagram_business',
+  'tiktok_business',
+  'snapchat_business',
+  'linkedin_org',
+  'x_twitter',
+] as const;
+
+const PLATFORM_BRAND: Record<string, string> = {
+  facebook_page: '#1877F2',
+  instagram_business: '#C13584',
+  tiktok_business: '#111111',
+  snapchat_business: '#E6A800',
+  linkedin_org: '#0A66C2',
+  x_twitter: '#000000',
+};
+
+function PlatformGlyph({ platform }: { platform: string }) {
+  const common = { width: 26, height: 26, viewBox: '0 0 24 24' } as const;
+  return (
+    <span
+      className="social-logo"
+      style={{ background: PLATFORM_BRAND[platform] ?? '#555' }}
+      aria-hidden="true"
+    >
+      {platform === 'facebook_page' ? (
+        <svg {...common}>
+          <text x="12" y="17.5" textAnchor="middle" fontSize="16" fontWeight="bold" fill="#fff" fontFamily="Arial, sans-serif">f</text>
+        </svg>
+      ) : platform === 'instagram_business' ? (
+        <svg {...common} fill="none" stroke="#fff" strokeWidth="2">
+          <rect x="4.5" y="4.5" width="15" height="15" rx="4.5" />
+          <circle cx="12" cy="12" r="3.4" />
+          <circle cx="16.9" cy="7.1" r="1.4" fill="#fff" stroke="none" />
+        </svg>
+      ) : platform === 'tiktok_business' ? (
+        <svg {...common} fill="#fff">
+          <ellipse cx="8.6" cy="17.2" rx="3.1" ry="2.5" />
+          <rect x="10.6" y="4" width="2.7" height="12" />
+          <rect x="10.6" y="4" width="6.4" height="2.7" />
+        </svg>
+      ) : platform === 'snapchat_business' ? (
+        <svg {...common} fill="#fff">
+          <path d="M12 3.2c-3.4 0-5.4 2.5-5.4 5.8v3c-.7.3-1.7.7-1.7 1.4 0 .8 1 1 1.7 1.1.3.9 1 2.3 1.9 2.3.9 0 .8-1.3 3.5-1.3s2.6 1.3 3.5 1.3c.9 0 1.6-1.4 1.9-2.3.7-.1 1.7-.3 1.7-1.1 0-.7-.9-1.1-1.6-1.4V9c0-3.3-2-5.8-5.5-5.8z" />
+        </svg>
+      ) : platform === 'linkedin_org' ? (
+        <svg {...common}>
+          <text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="bold" fill="#fff" fontFamily="Arial, sans-serif">in</text>
+        </svg>
+      ) : (
+        <svg {...common} fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round">
+          <path d="M6 5l12 14M18 5L6 19" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+type ClientStatus = 'connected' | 'reconnect' | 'notConnected' | 'unavailable';
+
+function ConnectAccountsTab({
   overview,
   locale,
   t,
   busy,
   onConnect,
   onDisconnect,
-  onVerify,
 }: {
   overview: Overview;
   locale: 'ar' | 'en';
@@ -600,232 +654,106 @@ function AccountsTab({
   busy: string | null;
   onConnect: (platform: string) => void;
   onDisconnect: (connection: Connection) => void;
-  onVerify: (connection: Connection) => void;
 }) {
-  const capabilityRows: Array<[string, string]> = [
-    ['publishText', 'social.cap.publishText'],
-    ['publishImage', 'social.cap.publishImage'],
-    ['publishVideo', 'social.cap.publishVideo'],
-    ['nativeScheduling', 'social.cap.nativeScheduling'],
-    ['readComments', 'social.cap.readComments'],
-    ['readAnalytics', 'social.cap.readAnalytics'],
-    ['ads', 'social.cap.ads'],
-  ];
-
-  // Phase 0: Google Analytics, Search Console and Tag Manager are not part of
-  // the product surface. Their tables and connections are kept, but they are
-  // not offered here as features.
-  const visiblePlatforms = overview.platforms.filter((platform) => platform.category === 'social');
-  const hiddenGoogle = overview.platforms.filter((platform) =>
-    ['ga4', 'search_console', 'google_tag_manager'].includes(platform.key)
-  );
-
-  const setupRow = (label: string, ready: boolean, requires: string[]) => (
-    <li key={label} className="social-setup-row">
-      <span>{label}</span>
-      <span className={cx('badge', ready ? 'badge-ok' : 'badge-warn')}>
-        {ready ? t('social.setupReady') : t('social.setupMissing')}
-      </span>
-      {!ready && requires.length ? (
-        <code className="social-requires" dir="ltr">
-          {requires.join(' · ')}
-        </code>
-      ) : null}
-    </li>
-  );
+  const byKey = new Map(overview.platforms.map((platform) => [platform.key, platform]));
 
   return (
     <div className="social-stack">
-      <Card title={t('social.setupTitle')} subtitle={t('social.setupHint')}>
-        <ul className="social-setup">
-          {setupRow(t('social.setupTokenKey'), overview.setup.tokenKeyConfigured, ['SOCIAL_TOKEN_KEY'])}
-          {setupRow(t('social.setupMeta'), overview.setup.meta.configured, overview.setup.meta.requires)}
-          {setupRow(t('social.setupGoogle'), overview.setup.google.configured, overview.setup.google.requires)}
-          {setupRow(t('social.setupEmail'), overview.setup.email.configured, overview.setup.email.requires)}
-          {setupRow(t('social.setupScheduler'), overview.setup.scheduler.state === 'configured', [
-            'JOBS_SECRET',
-          ])}
-        </ul>
-        {overview.setup.scheduler.state !== 'configured' ? (
-          <Alert tone="warn">{t('social.setupSchedulerOff')}</Alert>
-        ) : (
-          <p className="muted small">{t('social.schedulerManualOnly')}</p>
-        )}
+      <Card title={t('social.connectTitle')} subtitle={t('social.connectSubtitle')}>
         {!overview.subscription.isActive ? (
           <Alert tone="danger">{t('social.subscriptionBlocked')}</Alert>
         ) : null}
-      </Card>
-
-      {hiddenGoogle.length ? (
-        <Card title={t('social.googleHiddenTitle')}>
-          <p className="muted small">{t('social.googleHiddenNote')}</p>
-          <ul className="social-setup">
-            {hiddenGoogle.map((platform) => (
-              <li key={platform.key} className="social-setup-row">
-                <span>{platform.name[locale]}</span>
-                <span className="badge badge-muted">{t(`social.state.${platform.state}`, platform.state)}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
-
-      {visiblePlatforms.map((platform) => (
-        <Card
-          key={platform.key}
-          title={
-            <span className="social-platform-head">
-              {platform.name[locale]}
-              <span className={cx('badge', `badge-${stateTone(platform.state)}`)}>
-                {t(`social.state.${platform.state}`, platform.state)}
-              </span>
-              {platform.availability === 'requires_credentials' ? (
-                <span className="badge badge-warn">{t('social.state.requires_credentials')}</span>
-              ) : null}
-            </span>
-          }
-          subtitle={platform.accountRequirement[locale]}
-        >
-          <div className="social-capabilities">
-            {capabilityRows.map(([key, label]) => {
-              const state = platform.capabilityStates?.[key] ?? 'not_supported';
-              return (
-                <span
-                  key={key}
-                  className={cx('social-cap', state === 'working_test' ? 'is-yes' : 'is-no')}
-                  title={t(`social.state.${state}`, state)}
-                >
-                  {t(label)}: {t(`social.state.${state}`, state)}
-                </span>
-              );
-            })}
-          </div>
-
-          {platform.access.reviewRequired ? (
-            <p className="social-review-note">
-              <strong>{t('social.reviewNeeded')}: </strong>
-              {platform.access.reviewNote[locale]}
-            </p>
-          ) : null}
-
-          {platform.availability !== 'available' ? (
-            <Alert tone={platform.availability === 'requires_credentials' ? 'warn' : 'info'}>
-              <div>{t(`social.reason.${platform.availabilityReasons[0] ?? 'unavailable'}`, t('social.reason.unavailable'))}</div>
-              {platform.availabilityReasons.some((reason) => reason.includes('_')) &&
-              platform.availabilityReasons.some((reason) => /^[A-Z_]+$/.test(reason)) ? (
-                <code className="social-requires" dir="ltr">
-                  {platform.availabilityReasons.filter((reason) => /^[A-Z_]+$/.test(reason)).join(' · ')}
-                </code>
-              ) : null}
-            </Alert>
-          ) : null}
-
-          <div className="social-connection-list">
-            {platform.connections.length ? (
-              platform.connections.map((connection) => (
-                <div key={connection.id} className="social-connection">
-                  <div className="social-connection-main">
-                    <strong>{connection.accountName}</strong>
-                    <span className="muted small" dir="ltr">
-                      {connection.accountId}
-                      {connection.pageId ? ` · page ${connection.pageId}` : ''}
-                    </span>
-                    <span className={cx('badge', `badge-${tokenTone(connection.tokenStatus)}`)}>
-                      {t(`social.state.${connection.tokenStatus}`)}
-                    </span>
+        <ul className="social-connect-list">
+          {LINKABLE_PLATFORMS.map((key) => {
+            const platform = byKey.get(key);
+            if (!platform) return null;
+            const live = platform.connections.filter(
+              (connection) => connection.tokenStatus === 'connected' || connection.tokenStatus === 'expiring'
+            );
+            const stale = platform.connections.filter(
+              (connection) => connection.tokenStatus === 'expired' || connection.tokenStatus === 'requires_reconnect'
+            );
+            const canStart = platform.oauthImplemented && platform.availability === 'available';
+            const status: ClientStatus = live.length
+              ? 'connected'
+              : stale.length
+                ? 'reconnect'
+                : canStart
+                  ? 'notConnected'
+                  : 'unavailable';
+            return (
+              <li key={key} className="social-connect-card">
+                <div className="social-connect-head">
+                  <PlatformGlyph platform={key} />
+                  <div>
+                    <strong>{t(`social.platformShort.${key}`, platform.name[locale])}</strong>
+                    <p className="muted small">{t(`social.platformDesc.${key}`)}</p>
                   </div>
-                  <dl className="social-meta">
-                    <div>
-                      <dt>{t('social.expires')}</dt>
-                      <dd>{connection.expiresAt ? formatDateTime(connection.expiresAt, locale) : t('social.noExpiry')}</dd>
-                    </div>
-                    <div>
-                      <dt>{t('social.connectedAt')}</dt>
-                      <dd>{formatDateTime(connection.connectedAt, locale)}</dd>
-                    </div>
-                    <div>
-                      <dt>{t('social.lastSync')}</dt>
-                      <dd>{connection.lastSyncAt ? formatDateTime(connection.lastSyncAt, locale) : '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>{t('social.grantedScopes')}</dt>
-                      <dd dir="ltr">
-                        {connection.grantedScopes.length
-                          ? connection.grantedScopes.join(', ')
-                          : connection.scopes.join(', ') || '—'}
-                      </dd>
-                    </div>
-                  </dl>
-                  {connection.lastError ? (
-                    <p className="social-error" dir="ltr">
-                      {connection.lastError}
-                    </p>
-                  ) : null}
+                  <span className={cx('badge', status === 'connected' ? 'badge-ok' : status === 'unavailable' ? 'badge-muted' : 'badge-warn')}>
+                    {t(`social.state.${status === 'connected' ? 'connected' : status === 'reconnect' ? 'requires_reconnect' : 'not_connected'}`, status)}
+                  </span>
+                </div>
+                <p className="muted small">{t(`social.accountStatus.${status}`)}</p>
+                {live.length ? (
+                  <ul className="social-connect-accounts">
+                    {live.map((connection) => (
+                      <li key={connection.id}>
+                        <strong>{connection.accountName}</strong>
+                        {connection.profileUrl ? (
+                          <a
+                            className="btn btn-secondary btn-sm"
+                            href={connection.profileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {t('social.openAccount')}
+                          </a>
+                        ) : null}
+                        {overview.canManage ? (
+                          <Button size="sm" variant="danger" onClick={() => onDisconnect(connection)}>
+                            {t('social.disconnect')}
+                          </Button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {overview.canManage && status === 'reconnect' ? (
                   <div className="row-actions">
-                    {overview.canManage ? (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          loading={busy === connection.id}
-                          onClick={() => onVerify(connection)}
-                        >
-                          {t('social.verify')}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          loading={busy === platform.key}
-                          onClick={() => onConnect(platform.key)}
-                        >
-                          {t('social.reconnect')}
-                        </Button>
+                    <Button loading={busy === key} onClick={() => onConnect(key)}>
+                      {t('social.reconnect')}
+                    </Button>
+                  </div>
+                ) : null}
+                {overview.canManage && stale.length && status === 'connected' ? (
+                  <ul className="social-connect-accounts">
+                    {stale.map((connection) => (
+                      <li key={connection.id}>
+                        <span className="muted small">
+                          {connection.accountName} · {t('social.state.requires_reconnect')}
+                        </span>
                         <Button size="sm" variant="danger" onClick={() => onDisconnect(connection)}>
                           {t('social.disconnect')}
                         </Button>
-                      </>
-                    ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {overview.canManage && status === 'notConnected' ? (
+                  <div className="row-actions">
+                    <Button loading={busy === key} onClick={() => onConnect(key)}>
+                      {t('social.connect')}
+                    </Button>
                   </div>
-                </div>
-              ))
-            ) : (
-              <EmptyState>{t('social.noConnections')}</EmptyState>
-            )}
-          </div>
-
-          {overview.canManage && platform.oauthImplemented ? (
-            <div className="row-actions">
-              <Button
-                loading={busy === platform.key}
-                disabled={platform.availability === 'requires_credentials' || platform.availability === 'not_supported'}
-                onClick={() => onConnect(platform.key)}
-              >
-                {t('social.connect')}
-              </Button>
-              <span className="muted small" dir="ltr">
-                {platform.access.scopes.join(' · ')}
-              </span>
-            </div>
-          ) : null}
-        </Card>
-      ))}
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </Card>
     </div>
   );
 }
-
-/** Tones for the states this build may claim. `live_verified` is never set
- * by the build itself; it exists so a verified run has a label. */
-const stateTone = (state: string) =>
-  state === 'working_test' || state === 'live_verified'
-    ? 'ok'
-    : state === 'requires_credentials' || state === 'requires_app_review'
-      ? 'warn'
-      : state === 'not_implemented' || state === 'blocked_by_hosting'
-        ? 'info'
-        : 'muted';
-
-const tokenTone = (state: string) =>
-  state === 'connected' ? 'ok' : state === 'expiring' ? 'warn' : 'danger';
 
 // ---------------------------------------------------------------------------
 // Library
@@ -1381,7 +1309,7 @@ function QueueTab({
   events: EventRow[];
   locale: 'ar' | 'en';
   t: (key: string, fallback?: string) => string;
-  scheduler: { state: string; execution: string; automatic: boolean };
+  scheduler: { state: string; execution: string; automatic: boolean } | null;
   busy: string | null;
   onRun: () => void;
 }) {
@@ -1396,11 +1324,13 @@ function QueueTab({
           </Button>
         }
       >
-        {scheduler.state !== 'configured' ? (
-          <Alert tone="warn">{t('social.schedulerOff')}</Alert>
-        ) : (
-          <Alert tone="info">{t('social.schedulerManualOnly')}</Alert>
-        )}
+        {scheduler ? (
+          scheduler.state !== 'configured' ? (
+            <Alert tone="warn">{t('social.schedulerOff')}</Alert>
+          ) : (
+            <Alert tone="info">{t('social.schedulerManualOnly')}</Alert>
+          )
+        ) : null}
         {jobs.length === 0 ? (
           <EmptyState>{t('social.queueEmpty')}</EmptyState>
         ) : (
