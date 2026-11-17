@@ -194,7 +194,10 @@ function leadDataSource(env: any) {
   const key = str(env.LEAD_DATA_API_KEY, 400);
   const endpoint = isHttpUrl(url) ? url : null;
 
-  if (OPEN_DATA_PROVIDERS.includes(configured)) {
+  // OpenStreetMap needs no key, so it is the default when nothing is
+  // configured: the source shows "connected" out of the box instead of
+  // forcing the owner to set LEAD_DATA_PROVIDER=openstreetmap manually.
+  if (!configured || OPEN_DATA_PROVIDERS.includes(configured)) {
     return {
       provider: 'openstreetmap',
       kind: 'open_data' as const,

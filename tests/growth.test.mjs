@@ -238,10 +238,12 @@ async function main() {
     metaChannel
   );
 
+  const openSource = (overview.data?.sources ?? []).find((source) => source.provider === 'openstreetmap');
+  check('OpenStreetMap is connected by default (no key needed)', openSource?.state === 'connected', openSource);
   const discovery = await owner.req(`${base}/discover`, { method: 'POST', body: { limit: 5 } });
   check(
-    'discovery refuses without a source (stable code)',
-    discovery.status === 409 && discovery.data?.error?.code === 'lead_source_not_connected',
+    'discovery waits for an approved analysis (stable code)',
+    discovery.status === 409 && discovery.data?.error?.code === 'analysis_not_approved',
     discovery.data
   );
   const afterDiscovery = await owner.req(`${base}/leads`);
