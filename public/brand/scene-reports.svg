@@ -31,4 +31,12 @@
     <g stroke="#1E4157" stroke-dasharray="4 8"><path d="M80 300 H560"/><path d="M80 250 H560"/></g>
     <rect x="80" y="210" width="96" height="10" rx="5" fill="#8FB0C2" opacity="0.55"/>
   </g>
+  <g transform="translate(348 396)" font-family="Segoe UI, Arial, sans-serif" font-size="11">
+    <rect width="256" height="30" rx="15" fill="#0F2432" stroke="#1E4157" stroke-width="2"/>
+    <circle cx="18" cy="15" r="5" fill="#2BE3CE"/>
+    <text x="32" y="19" fill="#E8F4F2">measured inside Wusool</text>
+    <rect x="176" width="80" height="30" rx="15" fill="#2A2114" stroke="#F4B942" stroke-width="2"/>
+    <text x="216" y="19" fill="#F4B942" text-anchor="middle">unavailable</text>
+  </g>
+  <title>An internal performance chart with real sources, next to a clearly marked unavailable metric</title>
 </svg>

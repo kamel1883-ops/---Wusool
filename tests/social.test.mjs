@@ -104,8 +104,21 @@ function startFakeProvider() {
             tasks: ['CREATE_CONTENT', 'MODERATE'],
             instagram_business_account: { id: 'IG456', username: 'test_ig' },
           },
+          {
+            id: 'PAGE999',
+            name: 'Backup Page',
+            access_token: 'FAKE_PAGE2_TOKEN',
+            tasks: ['CREATE_CONTENT'],
+          },
         ],
       });
+    }
+
+    // A second Page that always fails, so partial publication can be proven
+    // without inventing a success for the failing platform.
+    if (/\/PAGE999\/feed$/.test(url.pathname) && request.method === 'POST') {
+      state.feedCalls.push({ page: 'PAGE999' });
+      return json({ error: { message: 'Page is temporarily unavailable', code: 2 } }, 500);
     }
 
     if (/\/PAGE123\/feed$/.test(url.pathname) && request.method === 'POST') {
@@ -138,6 +151,49 @@ function startFakeProvider() {
 
     if (/\/IG_MEDIA_1$/.test(url.pathname)) {
       return json({ permalink: 'https://www.instagram.com/p/AbCdEf/' });
+    }
+
+    // LinkedIn
+    if (url.pathname === '/oauth/v2/accessToken' && request.method === 'POST') {
+      return json({
+        access_token: 'FAKE_LINKEDIN_TOKEN',
+        expires_in: 3600,
+        scope: 'w_organization_social r_organization_social',
+      });
+    }
+    if (url.pathname === '/v2/organizationAcls') {
+      if (request.headers.authorization !== 'Bearer FAKE_LINKEDIN_TOKEN') {
+        return json({ message: 'invalid token' }, 401);
+      }
+      return json({
+        elements: [
+          {
+            organization: 'urn:li:organization:555',
+            role: 'ADMINISTRATOR',
+            state: 'APPROVED',
+            'organization~': { id: 555, localizedName: 'Acme Org', vanityName: 'acme' },
+          },
+        ],
+      });
+    }
+
+    // X / Twitter
+    if (url.pathname === '/2/oauth2/token' && request.method === 'POST') {
+      if (!request.headers.authorization?.startsWith('Basic ')) {
+        return json({ error: 'invalid_client' }, 401);
+      }
+      return json({
+        access_token: 'FAKE_X_TOKEN',
+        refresh_token: 'FAKE_X_REFRESH',
+        expires_in: 7200,
+        scope: 'tweet.read tweet.write users.read offline.access',
+      });
+    }
+    if (url.pathname === '/2/users/me') {
+      if (request.headers.authorization !== 'Bearer FAKE_X_TOKEN') {
+        return json({ title: 'Unauthorized' }, 401);
+      }
+      return json({ data: { id: 'x_1', name: 'Acme', username: 'acme' } });
     }
 
     // Google
@@ -280,6 +336,8 @@ async function main() {
     'migrations/0005_concurrency.sql',
     'migrations/0006_growth.sql',
     'migrations/0007_social.sql',
+    'migrations/0008_social_review.sql',
+    'migrations/0009_tracking.sql',
   ]) {
     migrate(file);
   }
@@ -301,6 +359,14 @@ async function main() {
     `SOCIAL_GOOGLE_ADMIN_BASE:${FAKE}`,
     `GOOGLE_CLIENT_ID:test-google-id`,
     `GOOGLE_CLIENT_SECRET:test-google-secret`,
+    `LINKEDIN_CLIENT_ID:test-linkedin-id`,
+    `LINKEDIN_CLIENT_SECRET:test-linkedin-secret`,
+    `X_CLIENT_ID:test-x-id`,
+    `X_CLIENT_SECRET:test-x-secret`,
+    `SOCIAL_LINKEDIN_API_BASE:${FAKE}`,
+    `SOCIAL_X_API_BASE:${FAKE}`,
+    `SOCIAL_X_OAUTH_BASE:${FAKE}`,
+    `TRACKING_SALT:test-tracking-salt`,
   ].flatMap((value) => ['--var', value]);
 
   server = spawn(
@@ -340,7 +406,7 @@ async function main() {
   const companyA = await createCompany(admin, 'شركة النشر', 'publish-owner@example.com');
   const companyB = await createCompany(admin, 'شركة أخرى', 'other-owner@example.com');
   const ownerA = await signIn('ownerA', 'publish-owner@example.com', companyA.tempPassword, 'PublishOwner12345');
-  const ownerB = await signIn('ownerB', 'other-owner@example.com', companyB.tempPassword, 'OtherOwner12345');
+  let ownerB = await signIn('ownerB', 'other-owner@example.com', companyB.tempPassword, 'OtherOwner12345');
 
   const baseA = `/api/company/${companyA.companyId}/social`;
   const baseB = `/api/company/${companyB.companyId}/social`;
@@ -354,7 +420,7 @@ async function main() {
   const overview = await ownerA.req(baseA);
   check('social overview loads', overview.status === 200, overview.data);
   const platforms = overview.data?.platforms ?? [];
-  check('all eleven channels are listed', platforms.length === 11, platforms.length);
+  check('all twelve channels are listed', platforms.length === 12, platforms.length);
 
   const byKey = Object.fromEntries(platforms.map((item) => [item.key, item]));
   check(
@@ -369,9 +435,24 @@ async function main() {
     byKey.email
   );
   check(
-    'TikTok is reported as not supported instead of offering a dead button',
-    byKey.tiktok_business?.availability === 'not_supported',
-    byKey.tiktok_business?.availability
+    'TikTok reports the credentials it needs instead of offering a dead button',
+    byKey.tiktok_business?.availability === 'requires_credentials' &&
+      byKey.tiktok_business?.availabilityReasons?.includes('TIKTOK_CLIENT_KEY') &&
+      byKey.tiktok_business?.state === 'requires_credentials',
+    byKey.tiktok_business
+  );
+  check(
+    'Snapchat is listed with its official connector and state',
+    byKey.snapchat_business?.oauthImplemented === true &&
+      byKey.snapchat_business?.state === 'requires_credentials',
+    byKey.snapchat_business
+  );
+  check(
+    'LinkedIn and X connectors exist and report their review state honestly',
+    byKey.linkedin_org?.state === 'requires_app_review' &&
+      byKey.x_twitter?.state === 'requires_app_review' &&
+      byKey.linkedin_org?.capabilityStates?.publishText === 'not_implemented',
+    { linkedin: byKey.linkedin_org, x: byKey.x_twitter }
   );
   check(
     'the capability matrix is served, not hardcoded in the client',
@@ -381,8 +462,19 @@ async function main() {
   );
   check(
     'scheduler readiness is reported from the server secret',
-    overview.data?.setup?.scheduler === 'configured',
+    overview.data?.setup?.scheduler?.state === 'configured' &&
+      overview.data?.setup?.scheduler?.automatic === false,
     overview.data?.setup
+  );
+  check(
+    'the deployment states that platform analytics are not implemented',
+    overview.data?.analytics?.state === 'not_implemented',
+    overview.data?.analytics
+  );
+  check(
+    'an active subscription is reported on the workspace',
+    overview.data?.subscription?.isActive === true,
+    overview.data?.subscription
   );
 
   const tiktokStart = await ownerA.req(`${baseA}/oauth/start`, {
@@ -390,9 +482,99 @@ async function main() {
     body: { platform: 'tiktok_business' },
   });
   check(
-    'starting an unsupported OAuth flow is refused with a stable code',
-    tiktokStart.status === 409 && tiktokStart.data?.error?.code === 'oauth_not_supported',
+    'starting a connector without credentials is refused with a stable code',
+    tiktokStart.status === 409 && tiktokStart.data?.error?.code === 'platform_requires_credentials',
     tiktokStart.data
+  );
+
+  // LinkedIn and X both complete an official OAuth flow; their publishing is
+  // still blocked by capability state, not by a fake success.
+  const linkedinStart = await ownerA.req(`${baseA}/oauth/start`, {
+    method: 'POST',
+    body: { platform: 'linkedin_org' },
+  });
+  check('LinkedIn authorization starts', linkedinStart.status === 200, linkedinStart.data);
+  const linkedinUrl = new URL(linkedinStart.data.authorizeUrl);
+  check(
+    'the LinkedIn URL is the official v2 authorization endpoint',
+    linkedinUrl.pathname === '/oauth/v2/authorization' &&
+      linkedinUrl.searchParams.get('scope')?.includes('w_organization_social'),
+    linkedinStart.data.authorizeUrl
+  );
+  await ownerA.req(
+    `${baseA}/oauth/callback?code=li-code&state=${linkedinStart.data.state}`,
+    { method: 'GET' }
+  );
+  const linkedinPending = await ownerA.req(`${baseA}/oauth/pending?state=${linkedinStart.data.state}`);
+  check(
+    'the administered organizations are discovered',
+    linkedinPending.data?.accounts?.[0]?.accountId === '555',
+    linkedinPending.data
+  );
+  const linkedinComplete = await ownerA.req(`${baseA}/oauth/complete`, {
+    method: 'POST',
+    body: { state: linkedinStart.data.state, accountIds: ['555'] },
+  });
+  check('the LinkedIn organization is connected', linkedinComplete.status === 200, linkedinComplete.data);
+
+  const xStart = await ownerA.req(`${baseA}/oauth/start`, {
+    method: 'POST',
+    body: { platform: 'x_twitter' },
+  });
+  const xUrl = new URL(xStart.data.authorizeUrl);
+  check(
+    'X uses OAuth 2.0 with PKCE',
+    xUrl.searchParams.get('code_challenge')?.length > 20 &&
+      xUrl.searchParams.get('code_challenge_method') === 'S256',
+    xStart.data.authorizeUrl
+  );
+  await ownerA.req(`${baseA}/oauth/callback?code=x-code&state=${xStart.data.state}`, {
+    method: 'GET',
+  });
+  const xPending = await ownerA.req(`${baseA}/oauth/pending?state=${xStart.data.state}`);
+  check('the X account is discovered', xPending.data?.accounts?.[0]?.accountId === 'x_1', xPending.data);
+  const xComplete = await ownerA.req(`${baseA}/oauth/complete`, {
+    method: 'POST',
+    body: { state: xStart.data.state, accountIds: ['x_1'] },
+  });
+  check('the X account is connected', xComplete.status === 200, xComplete.data);
+
+  const afterExtra = await ownerA.req(baseA);
+  const linkedinConnection = (afterExtra.data?.connections ?? []).find(
+    (connection) => connection.platform === 'linkedin_org'
+  );
+  const xConnection = (afterExtra.data?.connections ?? []).find(
+    (connection) => connection.platform === 'x_twitter'
+  );
+  check(
+    'both new connectors expose their account and expiry',
+    linkedinConnection?.accountName === 'Acme Org' &&
+      Boolean(linkedinConnection?.expiresAt) &&
+      xConnection?.accountName === '@acme',
+    { linkedinConnection, xConnection }
+  );
+  check(
+    'no LinkedIn or X token appears in the response',
+    !JSON.stringify(afterExtra.data).includes('FAKE_LINKEDIN_TOKEN') &&
+      !JSON.stringify(afterExtra.data).includes('FAKE_X_TOKEN'),
+    'a token leaked'
+  );
+
+  const linkedinPost = await ownerA.req(`${baseA}/posts`, {
+    method: 'POST',
+    body: {
+      title: 'LinkedIn test',
+      bodyAr: 'نص تجريبي لمنصة LinkedIn',
+      language: 'ar',
+      targets: [{ platform: 'linkedin_org', connectionId: linkedinConnection.id }],
+    },
+  });
+  const linkedinTarget = linkedinPost.data?.post?.targets?.[0];
+  check(
+    'a platform whose publishing is not implemented is blocked before approval',
+    linkedinTarget?.status === 'blocked' &&
+      linkedinTarget?.issues?.some((issue) => issue.code === 'publish_not_implemented'),
+    linkedinTarget
   );
 
   // -------------------------------------------------------------------------
@@ -410,6 +592,46 @@ async function main() {
       authorizeUrl.searchParams.get('scope')?.includes('pages_manage_posts'),
     started.data.authorizeUrl
   );
+  check(
+    'the authorize URL targets the single platform-wide redirect URI',
+    authorizeUrl.searchParams.get('redirect_uri') === `${BASE}/api/social/oauth/callback`,
+    authorizeUrl.searchParams.get('redirect_uri')
+  );
+
+  // One redirect URI per provider, never per tenant: the company is resolved
+  // from the state row and checked against the caller's membership.
+  const sharedStart = await ownerA.req(`${baseA}/oauth/start`, {
+    method: 'POST',
+    body: { platform: 'facebook_page' },
+  });
+  const foreignShared = await ownerB.req(
+    `/api/social/oauth/callback?code=shared-code&state=${sharedStart.data.state}`,
+    { method: 'GET' }
+  );
+  check(
+    "the shared callback refuses another user's state",
+    foreignShared.location?.includes('oauth=owner_mismatch'),
+    foreignShared.location
+  );
+  const sharedCallback = await ownerA.req(
+    `/api/social/oauth/callback?code=shared-code&state=${sharedStart.data.state}`,
+    { method: 'GET' }
+  );
+  check(
+    'the shared callback resolves the company and lands on its picker',
+    sharedCallback.location ===
+      `/app/${companyA.companyId}/social?oauth=select&state=${sharedStart.data.state}`,
+    sharedCallback.location
+  );
+  const anonymousShared = await fetch(`${BASE}/api/social/oauth/callback?code=x&state=y`, {
+    redirect: 'manual',
+  });
+  check(
+    'the shared callback requires a session',
+    anonymousShared.status === 401,
+    anonymousShared.status
+  );
+
   const oauthState = started.data.state;
 
   const badState = await ownerA.req(`${baseA}/oauth/callback?code=x&state=nope`, { method: 'GET' });
@@ -434,7 +656,12 @@ async function main() {
   check('an OAuth state cannot be reused', replay.location?.includes('oauth=used'), replay.location);
 
   const pending = await ownerA.req(`${baseA}/oauth/pending?state=${oauthState}`);
-  check('the Page and its Instagram account are discovered', pending.data?.accounts?.length === 2, pending.data);
+  check(
+    'the Pages and their Instagram account are discovered',
+    pending.data?.accounts?.length === 3 &&
+      pending.data.accounts.some((account) => account.accountId === 'IG456'),
+    pending.data
+  );
 
   const foreignComplete = await ownerB.req(`${baseB}/oauth/complete`, {
     method: 'POST',
@@ -630,21 +857,79 @@ async function main() {
   const igConnection = (withIg.data?.connections ?? []).find((c) => c.platform === 'instagram_business');
   check('the Instagram account is connected separately', Boolean(igConnection), withIg.data?.connections);
 
-  const multi = await ownerA.req(`${baseA}/posts`, {
+  // Facebook publishes text only in this build; an image is refused before
+  // approval rather than dropped silently at publish time.
+  const mediaPost = await ownerA.req(`${baseA}/posts`, {
+    method: 'POST',
+    body: {
+      ...previewPost,
+      media: [{ url: 'https://cdn.example.com/poster.jpg', kind: 'image' }],
+      targets: [{ platform: 'facebook_page', connectionId: fbConnection.id }],
+    },
+  });
+  const mediaTarget = mediaPost.data?.post?.targets?.[0];
+  check(
+    'Facebook media is blocked with its documented reason',
+    mediaTarget?.status === 'blocked' &&
+      mediaTarget?.issues?.some((issue) => issue.code === 'facebook_media_not_supported'),
+    mediaTarget
+  );
+
+  // Instagram publishes media only. A provider-side media failure is recorded
+  // as a failure, not as a published post.
+  const igOnly = await ownerA.req(`${baseA}/posts`, {
     method: 'POST',
     body: {
       ...previewPost,
       media: [{ url: 'https://cdn.example.com/poster-fail.jpg', kind: 'image' }],
+      targets: [{ platform: 'instagram_business', connectionId: igConnection.id }],
+    },
+  });
+  const igOnlyId = igOnly.data?.post?.id;
+  await ownerA.req(`${baseA}/posts/${igOnlyId}/submit`, { method: 'POST', body: {} });
+  await ownerA.req(`${baseA}/posts/${igOnlyId}/approve`, { method: 'POST', body: {} });
+  const igPublish = await ownerA.req(`${baseA}/posts/${igOnlyId}/publish`, { method: 'POST', body: {} });
+  const igTarget = igPublish.data?.post?.targets?.[0];
+  check(
+    'Instagram records the real provider failure',
+    igTarget?.status === 'failed' && igTarget?.errorCode === 'graph_9004',
+    igTarget
+  );
+
+  // Partial publication needs two targets that can both be ready: a second
+  // Facebook Page, one succeeding and one failing at the provider.
+  const secondFlow = await ownerA.req(`${baseA}/oauth/start`, {
+    method: 'POST',
+    body: { platform: 'facebook_page' },
+  });
+  await ownerA.req(
+    `${baseA}/oauth/callback?code=good-code-3&state=${secondFlow.data.state}`,
+    { method: 'GET' }
+  );
+  await ownerA.req(`${baseA}/oauth/complete`, {
+    method: 'POST',
+    body: { state: secondFlow.data.state, accountIds: ['PAGE999'] },
+  });
+  const withSecond = await ownerA.req(baseA);
+  const fbSecond = (withSecond.data?.connections ?? []).find(
+    (connection) => connection.accountId === 'PAGE999'
+  );
+  check('a second Page of the same platform can be connected', Boolean(fbSecond), withSecond.data?.connections);
+
+  const multi = await ownerA.req(`${baseA}/posts`, {
+    method: 'POST',
+    body: {
+      ...previewPost,
       targets: [
         { platform: 'facebook_page', connectionId: fbConnection.id },
-        { platform: 'instagram_business', connectionId: igConnection.id },
+        { platform: 'facebook_page', connectionId: fbSecond.id },
       ],
     },
   });
   const multiId = multi.data?.post?.id;
   const multiTargets = multi.data?.post?.targets ?? [];
   check(
-    'both platforms produce their own target',
+    'each account produces its own target',
     multiTargets.length === 2 && multiTargets.every((target) => target.status === 'ready'),
     multiTargets
   );
@@ -652,34 +937,37 @@ async function main() {
   await ownerA.req(`${baseA}/posts/${multiId}/submit`, { method: 'POST', body: {} });
   await ownerA.req(`${baseA}/posts/${multiId}/approve`, { method: 'POST', body: {} });
   const before = state.feedCalls.length;
+  const okBefore = state.feedCalls.filter((call) => call.page !== 'PAGE999').length;
   const publishedMulti = await ownerA.req(`${baseA}/posts/${multiId}/publish`, { method: 'POST', body: {} });
   const targetsMulti = publishedMulti.data?.post?.targets ?? [];
-  const fbMulti = targetsMulti.find((target) => target.platform === 'facebook_page');
-  const igMulti = targetsMulti.find((target) => target.platform === 'instagram_business');
+  const fbMulti = targetsMulti.find((target) => target.externalId === 'PAGE123_777');
+  const fbFailed = targetsMulti.find((target) => target.accountName === 'Backup Page');
   check(
     'the post ends partially published',
     publishedMulti.data?.post?.status === 'partially_published',
     publishedMulti.data?.post?.status
   );
-  check('Facebook stays published', fbMulti?.status === 'published', fbMulti);
+  check('the successful Page stays published', fbMulti?.status === 'published', fbMulti);
   check(
-    'Instagram records the real provider failure',
-    igMulti?.status === 'failed' && igMulti?.errorCode === 'graph_9004',
-    igMulti
+    'the failing Page records the provider error',
+    fbFailed?.status === 'failed',
+    fbFailed
   );
-  check('Facebook was not re-posted in the retry', state.feedCalls.length === before + 1, state.feedCalls.length);
+  check('exactly two publish attempts were made', state.feedCalls.length === before + 2, state.feedCalls.length);
 
   const retry = await ownerA.req(`${baseA}/posts/${multiId}/publish`, { method: 'POST', body: {} });
   const retryTargets = retry.data?.post?.targets ?? [];
   check(
-    'retrying touches only the failed platform',
-    retryTargets.find((target) => target.platform === 'facebook_page')?.attempts ===
-      fbMulti?.attempts &&
-      retryTargets.find((target) => target.platform === 'instagram_business')?.attempts >
-        igMulti?.attempts,
+    'retrying touches only the failed account',
+    retryTargets.find((target) => target.id === fbMulti?.id)?.attempts === fbMulti?.attempts &&
+      retryTargets.find((target) => target.id === fbFailed?.id)?.attempts > fbFailed?.attempts,
     retryTargets
   );
-  check('no second Facebook post was created', state.feedCalls.length === before + 1, state.feedCalls.length);
+  check(
+    'no second post was created for the account that succeeded',
+    state.feedCalls.filter((call) => call.page !== 'PAGE999').length === okBefore + 1,
+    state.feedCalls
+  );
 
   // -------------------------------------------------------------------------
   // Revoked token: the connection is marked for reconnect, not silently retried
@@ -703,7 +991,9 @@ async function main() {
     revokedTarget
   );
   const afterRevoke = await ownerA.req(baseA);
-  const fbAfter = (afterRevoke.data?.connections ?? []).find((c) => c.platform === 'facebook_page');
+  const fbAfter = (afterRevoke.data?.connections ?? []).find(
+    (c) => c.platform === 'facebook_page' && c.accountId === 'PAGE123'
+  );
   check(
     'the connection asks for a reconnect',
     fbAfter?.tokenStatus === 'requires_reconnect',
@@ -762,6 +1052,167 @@ async function main() {
     jobsAfter.data?.jobs?.[0]?.state === 'done',
     jobsAfter.data?.jobs
   );
+
+  // -------------------------------------------------------------------------
+  // Review: request changes, edit, reject, versions and restore
+  // -------------------------------------------------------------------------
+  const reviewPost = await ownerA.req(`${baseA}/posts`, {
+    method: 'POST',
+    body: {
+      ...previewPost,
+      bodyAr: 'النسخة الأولى',
+      targets: [{ platform: 'facebook_page', connectionId: fbConnection.id }],
+    },
+  });
+  const reviewId = reviewPost.data?.post?.id;
+  await ownerA.req(`${baseA}/posts/${reviewId}/submit`, { method: 'POST', body: {} });
+
+  const noReason = await ownerA.req(`${baseA}/posts/${reviewId}/request-changes`, {
+    method: 'POST',
+    body: {},
+  });
+  check(
+    'requesting changes without a reason is refused',
+    noReason.status === 422 && noReason.data?.error?.code === 'review_reason_required',
+    noReason.data
+  );
+
+  const changes = await ownerA.req(`${baseA}/posts/${reviewId}/request-changes`, {
+    method: 'POST',
+    body: { reason: 'أضف سعرًا واضحًا' },
+  });
+  check(
+    'a change request is stored with its reason',
+    changes.data?.post?.status === 'changes_requested' &&
+      changes.data?.post?.reviewNote === 'أضف سعرًا واضحًا',
+    changes.data?.post
+  );
+
+  const edited = await ownerA.req(`${baseA}/posts/${reviewId}`, {
+    method: 'PUT',
+    body: { ...previewPost, bodyAr: 'النسخة الثانية', reason: 'تعديل' },
+  });
+  check(
+    'editing returns the post to draft and clears the review note',
+    edited.data?.post?.status === 'draft' &&
+      edited.data?.post?.version === 2 &&
+      edited.data?.post?.reviewNote === null,
+    edited.data?.post
+  );
+
+  await ownerA.req(`${baseA}/posts/${reviewId}/submit`, { method: 'POST', body: {} });
+  const rejected = await ownerA.req(`${baseA}/posts/${reviewId}/reject`, {
+    method: 'POST',
+    body: { reason: 'العرض غير مناسب لهذا الشهر' },
+  });
+  check(
+    'a rejected post keeps the decision and its reason',
+    rejected.data?.post?.status === 'rejected' &&
+      rejected.data?.post?.reviewNote === 'العرض غير مناسب لهذا الشهر' &&
+      Boolean(rejected.data?.post?.reviewedAt),
+    rejected.data?.post
+  );
+
+  const v1 = await ownerA.req(`${baseA}/posts/${reviewId}/versions/1`);
+  check(
+    'the first version is kept exactly as it was',
+    v1.status === 200 && v1.data?.snapshot?.bodyAr === 'النسخة الأولى',
+    v1.data
+  );
+
+  const restored = await ownerA.req(`${baseA}/posts/${reviewId}/versions/1/restore`, {
+    method: 'POST',
+    body: {},
+  });
+  check(
+    'restoring creates a new draft instead of overwriting the original',
+    restored.status === 201 &&
+      restored.data?.post?.id !== reviewId &&
+      restored.data?.post?.status === 'draft' &&
+      restored.data?.post?.bodyAr === 'النسخة الأولى',
+    restored.data?.post
+  );
+  const originalStill = await ownerA.req(`${baseA}/posts/${reviewId}`);
+  check(
+    'the rejected post is untouched by a restore',
+    originalStill.data?.post?.status === 'rejected' && originalStill.data?.post?.version === 2,
+    originalStill.data?.post
+  );
+
+  // -------------------------------------------------------------------------
+  // Capability states and provider access approvals
+  // -------------------------------------------------------------------------
+  check(
+    'a channel name states what the build actually does',
+    byKey.facebook_page?.state === 'requires_app_review' &&
+      byKey.facebook_page?.capabilityStates?.publishImage === 'not_implemented',
+    byKey.facebook_page
+  );
+  check(
+    'Google Business Profile publishing is reported as not implemented',
+    byKey.google_business_profile?.capabilityStates?.publishText === 'not_implemented',
+    byKey.google_business_profile?.capabilityStates
+  );
+  check(
+    'a channel with no connector is not presented as available',
+    byKey.whatsapp_cloud?.state === 'not_supported' &&
+      byKey.whatsapp_cloud?.availability === 'not_supported',
+    byKey.whatsapp_cloud
+  );
+
+  const badAccess = await admin.req('/api/admin/settings', {
+    method: 'PATCH',
+    body: { values: { 'social.access.tiktok_business': 'approved' } },
+  });
+  check(
+    'an approval cannot be recorded for a channel that has no integration',
+    badAccess.status === 422,
+    badAccess.data
+  );
+
+  const approveAccess = await admin.req('/api/admin/settings', {
+    method: 'PATCH',
+    body: { values: { 'social.access.facebook_page': 'approved' } },
+  });
+  check('the platform admin can record a provider approval', approveAccess.status === 200, approveAccess.data);
+  const afterApproval = await ownerA.req(baseA);
+  const fbApproved = (afterApproval.data?.platforms ?? []).find((p) => p.key === 'facebook_page');
+  check(
+    'the recorded approval is reflected without claiming live verification',
+    fbApproved?.accessApproved === true && fbApproved?.reviewPending === false &&
+      fbApproved?.state === 'working_test',
+    fbApproved
+  );
+
+  // -------------------------------------------------------------------------
+  // Subscription gate
+  // -------------------------------------------------------------------------
+  const suspend = await admin.req(`/api/admin/companies/${companyB.companyId}`, {
+    method: 'PATCH',
+    body: { status: 'suspended' },
+  });
+  check('a company can be suspended', suspend.status === 200, suspend.data);
+  // Suspension revokes the members' sessions immediately, so the first thing
+  // they see is a 401 rather than a workspace they can still read.
+  const blockedSocial = await ownerB.req(baseB);
+  check(
+    'suspending a company invalidates its members’ sessions at once',
+    blockedSocial.status === 401,
+    blockedSocial.data
+  );
+  const blockedPost = await ownerB.req(`${baseB}/posts`, { method: 'POST', body: previewPost });
+  check('a suspended company cannot create a post', blockedPost.status === 401, blockedPost.status);
+  const reactivate = await admin.req(`/api/admin/companies/${companyB.companyId}`, {
+    method: 'PATCH',
+    body: {
+      status: 'active',
+      subscriptionEnd: new Date(Date.now() + 86_400_000 * 30).toISOString().slice(0, 10),
+    },
+  });
+  check('the company can be reactivated', reactivate.status === 200, reactivate.data);
+  ownerB = await signIn('ownerB-again', 'other-owner@example.com', 'OtherOwner12345');
+  const reopened = await ownerB.req(baseB);
+  check('access returns with an active subscription', reopened.status === 200, reopened.status);
 
   // -------------------------------------------------------------------------
   // Disconnect

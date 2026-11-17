@@ -2554,6 +2554,32 @@ small,
   color: #a9f6ec;
 }
 
+/* Linked nine-stage walk: previous/next keep the flow readable without a
+   mouse, and the counter anchors where the visitor is. */
+.lp-journey-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid rgba(126, 240, 224, 0.16);
+}
+
+.lp-journey-nav .btn {
+  flex: 0 0 auto;
+}
+
+.lp-journey-step {
+  font-size: 0.78rem;
+  color: rgba(234, 244, 243, 0.7);
+  white-space: nowrap;
+}
+
+.tag-muted {
+  opacity: 0.72;
+}
+
 .lp-status {
   display: inline-block;
   font-size: 0.68rem;
@@ -4133,4 +4159,61 @@ html {
   .social-media-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* Tracking, dashboard metrics and posters */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.metric-row {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.metric-row strong {
+  font-size: 1.15rem;
+}
+
+.poster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.poster-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card);
+}
+
+.poster-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0b1220;
+}
+
+.poster-card figcaption {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.code-block {
+  padding: 12px;
+  border-radius: 10px;
+  background: #0b1220;
+  color: #e2e8f0;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }

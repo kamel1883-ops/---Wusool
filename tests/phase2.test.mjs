@@ -103,8 +103,16 @@ class Client {
       if (pair.startsWith('ws_session=')) this.cookie = pair;
     }
     const type = response.headers.get('content-type') ?? '';
-    const data = type.includes('application/json') ? await response.json().catch(() => null) : null;
-    return { status: response.status, data, text: data ? JSON.stringify(data) : '' };
+    const raw = await response.text();
+    let data = null;
+    if (type.includes('application/json')) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = null;
+      }
+    }
+    return { status: response.status, data, text: raw };
   }
 }
 
@@ -137,7 +145,7 @@ async function main() {
   console.log('· starting wrangler dev');
   server = spawn(
     'npx',
-    ['wrangler', 'dev', '--local', '--port', String(PORT), `--persist-to=${PERSIST}`, '--log-level', 'error'],
+    ['wrangler', 'dev', '--local', '--port', String(PORT), `--persist-to=${PERSIST}`, '--log-level', 'error', '--var', 'OWNER_RESET_SECRET:test-owner-reset-value'],
     { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true }
   );
   const logStream = [];
@@ -602,6 +610,68 @@ async function main() {
 
   const crossAdmin = await viewer.req('/api/admin/site-analyses');
   check('tenant user cannot reach admin monitoring', crossAdmin.status === 403, crossAdmin.data);
+
+  // -------------------------------------------------------------------------
+  // One-time owner recovery
+  // -------------------------------------------------------------------------
+  const resetPage = await anon.req('/reset-owner');
+  check(
+    'the recovery page is served without a session',
+    resetPage.status === 200 && resetPage.text.includes('OWNER_RESET_SECRET'),
+    resetPage.status
+  );
+
+  const wrongReset = await anon.req('/reset-owner', {
+    method: 'POST',
+    body: {
+      email: adminEmail,
+      secret: 'wrong-secret',
+      password: 'RecoveredPass12345',
+      confirm: 'RecoveredPass12345',
+    },
+  });
+  check('a wrong recovery secret is refused', wrongReset.status === 403, wrongReset.status);
+
+  const oldLogin = await signIn('adminOld', adminEmail, 'AdminPass12345');
+  check('a failed recovery leaves the previous password working', Boolean(oldLogin.cookie));
+
+  const reset = await anon.req('/reset-owner', {
+    method: 'POST',
+    body: {
+      email: adminEmail,
+      secret: 'test-owner-reset-value',
+      password: 'RecoveredPass12345',
+      confirm: 'RecoveredPass12345',
+    },
+  });
+  check(
+    'the owner password is reset with the configured secret',
+    reset.status === 200 && reset.text.includes('تم تعيين'),
+    reset.status
+  );
+
+  const newLogin = await signIn('adminNew', adminEmail, 'RecoveredPass12345');
+  check('the new owner password signs in', Boolean(newLogin.cookie));
+
+  const oldPassword = await anon.req('/api/auth/login', {
+    method: 'POST',
+    body: { email: adminEmail, password: 'AdminPass12345' },
+  });
+  check('the previous owner password no longer works', oldPassword.status === 401, oldPassword.status);
+
+  const usedSession = await admin.req('/api/auth/me');
+  check('the reset ends existing sessions', usedSession.status === 401, usedSession.status);
+
+  const reuse = await anon.req('/reset-owner', {
+    method: 'POST',
+    body: {
+      email: adminEmail,
+      secret: 'test-owner-reset-value',
+      password: 'AnotherPass12345',
+      confirm: 'AnotherPass12345',
+    },
+  });
+  check('the same recovery secret cannot be used twice', reuse.status === 409, reuse.status);
 }
 
 main()

@@ -2,10 +2,12 @@
  * OAuth plumbing for the platforms whose official flow is implemented here.
  *
  * Implemented today: Meta (Facebook Pages + Instagram professional accounts,
- * which arrive together through a Page) and Google (GA4, Search Console,
- * Tag Manager, Business Profile discovery). TikTok, Snapchat and LinkedIn have
- * no authorization path in this build and are reported as `not_supported`
- * rather than shown behind a dead button.
+ * which arrive together through a Page), Google (GA4, Search Console, Tag
+ * Manager, Business Profile discovery), LinkedIn (organization admin ACLs),
+ * X (OAuth 2.0 + PKCE, users/me), TikTok (display profile) and Snapchat
+ * (business organizations). A connector can be authorized even when
+ * publishing is still blocked by the provider's review process; that is
+ * reported per capability rather than hidden behind a dead button.
  *
  * Security properties:
  *   * `state` is random, single use, expires in 10 minutes, and is bound to the
@@ -43,6 +45,37 @@ const googleAdminBase = (env: Env) =>
     /\/$/,
     ''
   );
+// Business Profile is two APIs with two hosts: Account Management lists the
+// business accounts that belong to the signed-in Google user, and Business
+// Information lists the locations inside each account. The old single-host
+// call is what made discovery fail even with access granted.
+const googleBizAccountBase = (env: Env) =>
+  String(
+    (env as any).SOCIAL_GOOGLE_BIZ_ACCOUNT_BASE ??
+      'https://mybusinessaccountmanagement.googleapis.com'
+  ).replace(/\/$/, '');
+const googleBizInfoBase = (env: Env) =>
+  String(
+    (env as any).SOCIAL_GOOGLE_BIZ_INFO_BASE ??
+      'https://mybusinessbusinessinformation.googleapis.com'
+  ).replace(/\/$/, '');
+const linkedinBase = (env: Env) =>
+  String((env as any).SOCIAL_LINKEDIN_API_BASE ?? 'https://www.linkedin.com').replace(/\/$/, '');
+const xBase = (env: Env) =>
+  String((env as any).SOCIAL_X_API_BASE ?? 'https://api.twitter.com').replace(/\/$/, '');
+const xOauthBase = (env: Env) =>
+  String((env as any).SOCIAL_X_OAUTH_BASE ?? 'https://twitter.com').replace(/\/$/, '');
+const tiktokBase = (env: Env) =>
+  String((env as any).SOCIAL_TIKTOK_API_BASE ?? 'https://open.tiktokapis.com').replace(/\/$/, '');
+const tiktokOauthBase = (env: Env) =>
+  String((env as any).SOCIAL_TIKTOK_OAUTH_BASE ?? 'https://www.tiktok.com').replace(/\/$/, '');
+const snapchatBase = (env: Env) =>
+  String((env as any).SOCIAL_SNAPCHAT_API_BASE ?? 'https://accounts.snapchat.com').replace(
+    /\/$/,
+    ''
+  );
+const snapchatAdsBase = (env: Env) =>
+  String((env as any).SOCIAL_SNAPCHAT_ADS_BASE ?? 'https://adsapi.snapchat.com').replace(/\/$/, '');
 
 export const isOauthPlatform = (key: string): key is PlatformKey =>
   PLATFORMS_WITH_OAUTH.includes(key as PlatformKey);
@@ -78,7 +111,7 @@ export async function startFlow(
     input.companyId,
     input.platform,
     input.userId,
-    spec.connector === 'google' ? verifier : null,
+    spec.connector === 'google' || spec.connector === 'twitter' ? verifier : null,
     input.redirectUri,
     nowIso(),
     expiresAt
@@ -94,6 +127,48 @@ export async function startFlow(
     url.searchParams.set('state', state);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', spec.access.scopes.join(','));
+    authorizeUrl = url.toString();
+  } else if (spec.connector === 'linkedin') {
+    const clientId = String((env as any).LINKEDIN_CLIENT_ID ?? '');
+    if (!clientId) throw new Error('linkedin_app_not_configured');
+    const url = new URL(`${linkedinBase(env)}/oauth/v2/authorization`);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', clientId);
+    url.searchParams.set('redirect_uri', input.redirectUri);
+    url.searchParams.set('state', state);
+    url.searchParams.set('scope', spec.access.scopes.join(' '));
+    authorizeUrl = url.toString();
+  } else if (spec.connector === 'twitter') {
+    const clientId = String((env as any).X_CLIENT_ID ?? '');
+    if (!clientId) throw new Error('x_app_not_configured');
+    const url = new URL(`${xOauthBase(env)}/i/oauth2/authorize`);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', clientId);
+    url.searchParams.set('redirect_uri', input.redirectUri);
+    url.searchParams.set('scope', spec.access.scopes.join(' '));
+    url.searchParams.set('state', state);
+    url.searchParams.set('code_challenge', await sha256b64url(verifier));
+    url.searchParams.set('code_challenge_method', 'S256');
+    authorizeUrl = url.toString();
+  } else if (spec.connector === 'tiktok') {
+    const clientKey = String((env as any).TIKTOK_CLIENT_KEY ?? '');
+    if (!clientKey) throw new Error('tiktok_app_not_configured');
+    const url = new URL(`${tiktokOauthBase(env)}/v2/auth/authorize/`);
+    url.searchParams.set('client_key', clientKey);
+    url.searchParams.set('scope', spec.access.scopes.join(','));
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('redirect_uri', input.redirectUri);
+    url.searchParams.set('state', state);
+    authorizeUrl = url.toString();
+  } else if (spec.connector === 'snapchat') {
+    const clientId = String((env as any).SNAPCHAT_CLIENT_ID ?? '');
+    if (!clientId) throw new Error('snapchat_app_not_configured');
+    const url = new URL(`${snapchatBase(env)}/login/oauth2/authorize`);
+    url.searchParams.set('client_id', clientId);
+    url.searchParams.set('redirect_uri', input.redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', spec.access.scopes.join(' '));
+    url.searchParams.set('state', state);
     authorizeUrl = url.toString();
   } else if (spec.connector === 'google') {
     const clientId = String((env as any).GOOGLE_CLIENT_ID ?? '');
@@ -159,6 +234,33 @@ async function metaExchange(
   };
 }
 
+/** Shared token POST. Providers all answer JSON with `access_token`. */
+async function formToken(
+  url: string,
+  body: URLSearchParams,
+  headers: Record<string, string> = {}
+): Promise<any> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+    body,
+  });
+  const payload: any = await response.json().catch(() => null);
+  if (!response.ok || !payload?.access_token) {
+    const detail =
+      payload?.error_description ?? payload?.error ?? payload?.message ?? `status_${response.status}`;
+    throw new Error(`token_failed:${String(detail).slice(0, 200)}`);
+  }
+  return payload;
+}
+
+const tokenSetOf = (payload: any, scopes: string[]): TokenSet => ({
+  accessToken: String(payload.access_token),
+  refreshToken: payload.refresh_token ? String(payload.refresh_token) : null,
+  expiresIn: Number(payload.expires_in ?? 0) || null,
+  scopes: payload.scope ? String(payload.scope).split(/[ ,]+/).filter(Boolean) : scopes,
+});
+
 export async function exchangeCode(
   env: Env,
   input: { platform: PlatformKey; code: string; redirectUri: string; verifier: string | null }
@@ -180,6 +282,65 @@ export async function exchangeCode(
       fb_exchange_token: shortLived.accessToken,
     });
     return longLived;
+  }
+
+  if (spec.connector === 'linkedin') {
+    const payload = await formToken(
+      `${linkedinBase(env)}/oauth/v2/accessToken`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        client_id: String((env as any).LINKEDIN_CLIENT_ID ?? ''),
+        client_secret: String((env as any).LINKEDIN_CLIENT_SECRET ?? ''),
+      })
+    );
+    return tokenSetOf(payload, spec.access.scopes);
+  }
+
+  if (spec.connector === 'twitter') {
+    const basic = btoa(
+      `${String((env as any).X_CLIENT_ID ?? '')}:${String((env as any).X_CLIENT_SECRET ?? '')}`
+    );
+    const payload = await formToken(
+      `${xBase(env)}/2/oauth2/token`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        code_verifier: input.verifier ?? '',
+      }),
+      { authorization: `Basic ${basic}` }
+    );
+    return tokenSetOf(payload, spec.access.scopes);
+  }
+
+  if (spec.connector === 'tiktok') {
+    const payload = await formToken(
+      `${tiktokBase(env)}/v2/oauth/token/`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        client_key: String((env as any).TIKTOK_CLIENT_KEY ?? ''),
+        client_secret: String((env as any).TIKTOK_CLIENT_SECRET ?? ''),
+      })
+    );
+    return tokenSetOf(payload, spec.access.scopes);
+  }
+
+  if (spec.connector === 'snapchat') {
+    const payload = await formToken(
+      `${snapchatBase(env)}/login/oauth2/access_token`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        client_id: String((env as any).SNAPCHAT_CLIENT_ID ?? ''),
+        client_secret: String((env as any).SNAPCHAT_CLIENT_SECRET ?? ''),
+      })
+    );
+    return tokenSetOf(payload, spec.access.scopes);
   }
 
   if (spec.connector === 'google') {
@@ -355,25 +516,158 @@ async function googleAccounts(
   }
 
   if (platform === 'google_business_profile') {
-    const payload = await get(
-      `${googleApiBase(env)}/v1/accounts?pageSize=100`
-    );
+    // Level 1: the business accounts under this Google user.
+    const accountsPayload = await get(`${googleBizAccountBase(env)}/v1/accounts?pageSize=100`);
     const out: DiscoveredAccount[] = [];
-    for (const account of payload?.accounts ?? []) {
-      out.push({
-        accountId: String(account.name ?? ''),
-        accountName: String(account.accountName ?? account.name ?? 'Business Profile'),
-        accountType: String(account.type ?? 'PERSONAL'),
-        pageId: null,
-        profileId: null,
-        accessToken: null,
-        metadata: { accountPath: account.name ?? null },
-      });
+    for (const account of accountsPayload?.accounts ?? []) {
+      const accountPath = String(account.name ?? '');
+      if (!accountPath) continue;
+      // Level 2: the actual locations. An account with no location is not a
+      // connection we can publish to or measure, so it is never stored.
+      const locationsPayload = await get(
+        `${googleBizInfoBase(env)}/v1/${accountPath}/locations?pageSize=100&readMask=name,title,storefrontAddress`
+      );
+      const locations = Array.isArray(locationsPayload?.locations) ? locationsPayload.locations : [];
+      for (const location of locations) {
+        const locationPath = String(location.name ?? '');
+        if (!locationPath) continue;
+        out.push({
+          accountId: locationPath,
+          accountName: `${String(account.accountName ?? accountPath)} · ${String(location.title ?? locationPath)}`,
+          accountType: 'business_location',
+          pageId: null,
+          profileId: locationPath,
+          accessToken: null,
+          metadata: {
+            businessAccount: accountPath,
+            businessAccountType: account.type ?? null,
+            location: locationPath,
+            locationTitle: location.title ?? null,
+            address: location.storefrontAddress ?? null,
+          },
+        });
+      }
     }
+    if (!out.length) throw new Error('gbp_no_locations');
     return out;
   }
 
   throw new Error('google_discovery_not_supported');
+}
+
+async function getJson(url: string, headers: Record<string, string>, label: string) {
+  const response = await fetch(url, { headers });
+  const payload: any = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`${label}_discovery_failed:${payload?.message ?? payload?.error ?? response.status}`);
+  }
+  return payload;
+}
+
+/** LinkedIn: the organizations this member administers. */
+async function linkedinOrganizations(env: Env, accessToken: string): Promise<DiscoveredAccount[]> {
+  const url =
+    `${linkedinBase(env)}/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&count=100` +
+    '&projection=(elements*(organization~(id,localizedName,vanityName),role,state))';
+  const payload = await getJson(
+    url,
+    {
+      authorization: `Bearer ${accessToken}`,
+      'LinkedIn-Version': String((env as any).LINKEDIN_VERSION ?? '202405'),
+      'X-Restli-Protocol-Version': '2.0.0',
+    },
+    'linkedin'
+  );
+  const out: DiscoveredAccount[] = [];
+  for (const element of payload?.elements ?? []) {
+    const organization = element?.organization ?? '';
+    const id = String(organization).split(':').pop() ?? '';
+    if (!id) continue;
+    const detail = element?.['organization~'] ?? {};
+    out.push({
+      accountId: id,
+      accountName: String(detail.localizedName ?? detail.vanityName ?? `Organization ${id}`),
+      accountType: 'linkedin_organization',
+      pageId: null,
+      profileId: id,
+      accessToken: null,
+      metadata: {
+        urn: String(organization),
+        role: element?.role ?? null,
+        state: element?.state ?? null,
+        vanityName: detail.vanityName ?? null,
+      },
+    });
+  }
+  return out;
+}
+
+/** X: the authenticated account itself. */
+async function xAccount(env: Env, accessToken: string): Promise<DiscoveredAccount[]> {
+  const payload = await getJson(
+    `${xBase(env)}/2/users/me?user.fields=username,name,verified`,
+    { authorization: `Bearer ${accessToken}` },
+    'x'
+  );
+  const user = payload?.data;
+  if (!user?.id) return [];
+  return [
+    {
+      accountId: String(user.id),
+      accountName: user.username ? `@${user.username}` : String(user.name ?? user.id),
+      accountType: 'x_account',
+      pageId: null,
+      profileId: String(user.id),
+      accessToken: null,
+      metadata: { name: user.name ?? null, username: user.username ?? null },
+    },
+  ];
+}
+
+/** TikTok: the authorized user profile (publishing is a separate approval). */
+async function tiktokAccount(env: Env, accessToken: string): Promise<DiscoveredAccount[]> {
+  const payload = await getJson(
+    `${tiktokBase(env)}/v2/user/info/?fields=open_id,union_id,display_name,avatar_url`,
+    { authorization: `Bearer ${accessToken}` },
+    'tiktok'
+  );
+  const user = payload?.data?.user ?? payload?.data;
+  if (!user?.open_id) return [];
+  return [
+    {
+      accountId: String(user.open_id),
+      accountName: String(user.display_name ?? user.open_id),
+      accountType: 'tiktok_user',
+      pageId: null,
+      profileId: String(user.open_id),
+      accessToken: null,
+      metadata: { unionId: user.union_id ?? null, avatarUrl: user.avatar_url ?? null },
+    },
+  ];
+}
+
+/** Snapchat: the business organizations behind the Marketing API token. */
+async function snapchatOrganizations(env: Env, accessToken: string): Promise<DiscoveredAccount[]> {
+  const payload = await getJson(
+    `${snapchatAdsBase(env)}/v1/me/organizations`,
+    { authorization: `Bearer ${accessToken}` },
+    'snapchat'
+  );
+  const out: DiscoveredAccount[] = [];
+  for (const row of payload?.organizations ?? []) {
+    const organization = row?.organization ?? row;
+    if (!organization?.id) continue;
+    out.push({
+      accountId: String(organization.id),
+      accountName: String(organization.name ?? organization.id),
+      accountType: 'snapchat_organization',
+      pageId: null,
+      profileId: String(organization.id),
+      accessToken: null,
+      metadata: { currency: organization.currency ?? null },
+    });
+  }
+  return out;
 }
 
 export async function discoverAccounts(
@@ -384,6 +678,10 @@ export async function discoverAccounts(
   const spec = PLATFORMS[platform];
   if (spec.connector === 'meta') return metaPages(env, accessToken);
   if (spec.connector === 'google') return googleAccounts(env, platform, accessToken);
+  if (spec.connector === 'linkedin') return linkedinOrganizations(env, accessToken);
+  if (spec.connector === 'twitter') return xAccount(env, accessToken);
+  if (spec.connector === 'tiktok') return tiktokAccount(env, accessToken);
+  if (spec.connector === 'snapchat') return snapchatOrganizations(env, accessToken);
   throw new Error('oauth_not_supported');
 }
 

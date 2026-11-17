@@ -1,98 +1,92 @@
 # الحسابات والقنوات الاجتماعية — ما يعمل وما ينتظر اعتمادًا خارجيًا
 
-هذا المستند هو المرجع الوحيد لحالة تكامل كل منصة. أي حالة هنا مشتقة من الخادم
+هذا المستند هو المرجع لحالة تكامل كل منصة. الحالة مشتقة من الخادم
 (`worker/lib/social/platforms.ts`) ومن أسرار النشر، وليست مفتاحًا في الواجهة.
 
-## ١. القاعدة
+## ١. الحالات
 
-لكل منصة حالة واحدة من أربع، وهي ما يظهر للعميل:
+لكل قناة حالتان تُعرضان معًا:
 
-| الحالة | المعنى |
+| الحقل | المعنى |
 | --- | --- |
-| `available` | التطبيق مضبوط والوصول مؤكد، ويمكن بدء التفويض الآن. |
-| `requires_credentials` | مفاتيح التطبيق غير موجودة على الخادم، والمطلوب مذكور بأسمائه. |
-| `pending_review` | التطبيق موجود لكن الوصول المتقدم غير مؤكد لهذا النشر (`social.access.<platform> = approved`). |
-| `not_supported` | لا يوجد مسار تفويض/نشر رسمي مكتمل في هذه النسخة — ولا زر وهمي. |
+| `availability` | هل يمكن بدء تفويض رسمي الآن؟ (`available` / `requires_credentials` / `pending_review` / `not_supported`) |
+| `state` | ما تفعله هذه النسخة فعلًا بالقناة: `working_test` / `requires_credentials` / `requires_app_review` / `not_implemented` / `not_supported` / `blocked_by_hosting` / `live_verified` |
+| `capabilityStates` | حالة كل قدرة على حدة (نشر نص/صورة/فيديو، جدولة أصلية، تعليقات، تحليلات، إعلانات) |
 
-ولكل حساب مرتبط حالة مستقلة: `connected` / `expiring` (أقل من ٧ أيام) / `expired` /
-`requires_reconnect` (رفض المزوّد الرمز أو فشل التجديد).
+`live_verified` لا تُضبط من هذا البناء؛ تحتاج تشغيلًا ناجحًا على حساب حقيقي.
 
-## ٢. مصفوفة القدرات (من وثائق المزوّدين)
+ولكل حساب مرتبط: `connected` / `expiring` (أقل من ٧ أيام) / `expired` / `requires_reconnect`.
 
-| المنصة | موصل OAuth | نشر نص | صورة | فيديو | جدولة أصلية | تعليقات | تحليلات | مراجعة تطبيق |
-| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Facebook Page | Meta (منفّذ) | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | نعم |
-| Instagram Business/Creator | Meta (منفّذ) | ❌ | ✅ | ✅ | ❌ | ✅ | ✅ | نعم |
-| Google Business Profile | Google (منفّذ) | ✅ (API) | ✅ | ❌ | ❌ | ❌ | ✅ | وصول منفصل |
-| GA4 | Google (منفّذ) | — | — | — | — | — | ✅ | لا |
-| Search Console | Google (منفّذ) | — | — | — | — | — | ✅ | لا |
-| Google Tag Manager | Google (منفّذ) | — | — | — | — | — | قراءة حاويات | لا |
-| البريد الإلكتروني | مزوّد إرسال (لا OAuth) | ✅ | ✅ | ❌ | ❌ | ❌ | تتبع عند المزوّد | SPF/DKIM |
-| WhatsApp Cloud | لا OAuth في هذه النسخة | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | قوالب معتمدة |
-| LinkedIn Organization | غير منفّذ | — | — | — | — | — | — | Community Management API |
-| TikTok Business | غير منفّذ | — | — | — | — | — | — | Content Posting API |
-| Snapchat Business | غير منفّذ | — | — | — | — | — | — | وصول شركاء |
+## ٢. مصفوفة القدرات (ما تفعله هذه النسخة)
+
+| المنصة | موصل OAuth | نشر | ملاحظة | مراجعة تطبيق |
+| --- | --- | --- | --- | --- |
+| Facebook Page | Meta (منفّذ) | نص + رابط فقط | الصور/الفيديو **محجوبة قبل الاعتماد** (`facebook_media_not_supported`) | نعم |
+| Instagram Business/Creator | Meta (منفّذ) | صورة/فيديو واحد | نص بلا وسيط مرفوض، وCarousel محجوب (`instagram_carousel_not_supported`)، JPEG فقط | نعم |
+| LinkedIn Organization | LinkedIn (منفّذ) | غير منفّذ | الربط واكتشاف الصفحات يعملان؛ النشر `not_implemented` | Community Management API |
+| X / Twitter | X (منفّذ، PKCE) | غير منفّذ | الربط يعمل؛ النشر يحتاج وصول API مدفوعًا وهو `not_implemented` | وصول مدفوع |
+| TikTok Business | TikTok (منفّذ) | غير منفّذ | الربط يعمل؛ النشر يحتاج مراجعة `video.publish` | Content Posting API |
+| Snapchat Business | Snapchat (منفّذ) | غير منفّذ | الربط يعمل؛ النشر يحتاج وصول شركاء | Marketing API |
+| Google Business Profile | Google (منفّذ) | غير منفّذ | الاكتشاف يشترط وجود Location؛ النشر `not_implemented` | وصول منفصل |
+| GA4 / Search Console / GTM | Google (منفّذ) | — | **خارج واجهة المنتج**؛ القدرات `not_implemented` | لا |
+| البريد الإلكتروني | مزوّد إرسال | نص/صورة | يحتاج مزوّدًا موثّقًا وموافقة مستلم | SPF/DKIM |
+| WhatsApp Cloud | لا OAuth | غير منفّذ | قوالب معتمدة فقط | قوالب |
 
 ملاحظات مثبتة من وثائق Meta:
 
-- نشر Instagram يحتاج **وسائط على رابط عام** (JPEG للصور)، ولا يقبل نصًا بلا وسيط.
-- `instagram_content_publish` و`pages_manage_posts` لحسابات لا تملكها تحتاج **App Review**
-  وBusiness Verification (Advanced Access). حساباتك المضافة إلى التطبيق تعمل بـ Standard Access.
-- نشر الصفحة يتم برمز الصفحة (Page access token) لا برمز المستخدم.
-- حد النشر على Instagram: ١٠٠ منشور عبر الـAPI لكل ٢٤ ساعة.
+- نشر Instagram يحتاج وسائط على رابط عام (JPEG للصور) ولا يقبل نصًا بلا وسيط.
+- `instagram_content_publish` و`pages_manage_posts` لحسابات لا تملكها تحتاج App Review
+  وBusiness Verification؛ حساباتك المضافة إلى التطبيق تعمل بـ Standard Access.
+- نشر الصفحة يتم برمز الصفحة لا برمز المستخدم.
 
-## ٣. ما تم تنفيذه في هذه المرحلة
+## ٣. المنفّذ
 
-- **OAuth رسمي**: Meta (Pages + Instagram المرتبط بالصفحة) وGoogle (GA4/Search Console/Tag Manager/
-  Business Profile). `state` عشوائي أحادي الاستخدام، مربوط بالمستخدم والشركة، وصلاحيته ١٠ دقائق،
-  وGoogle يستخدم PKCE.
-- **تخزين الرموز**: AES-256-GCM بمفتاح `SOCIAL_TOKEN_KEY` (٣٢ بايت base64) في جدول منفصل.
-  لا مسار API يعيد الرمز؛ تُعرض الحالة والصلاحيات وتاريخ الانتهاء فقط.
-- **حدود كل شركة**: كل صف ربط يحمل `company_id`، وكل مسار يشتق الشركة من العضوية.
-- **مكتبة منشورات**: منشور واحد، نسخة غير قابلة للاستبدال عند كل تعديل، تكييف لكل منصة،
-  أخطاء ومتطلبات ناقصة لكل هدف، ومعاينة من الخادم نفسه.
-- **اعتماد بشري**: `draft → awaiting_approval → approved → (scheduled) → publishing → published`.
-  لا نشر ولا جدولة قبل `approved`، والنشر الجزئي والفشل يُسجّلان لكل هدف على حدة.
-- **طابور دائم**: مهمة واحدة لكل هدف (`UNIQUE(target_id)`)، محاولات مع Backoff تصاعدي
-  (٦٠ث → ٢م → ٤م … بحد ساعة، ٣ محاولات)، ومنع النشر المكرر بفحص حالة الهدف قبل الإرسال.
-- **سجل نشاط** لكل ربط/فصل/إنشاء/اعتماد/نشر/فشل، و`audit_logs` لعمليات الحساب.
-- **اختبارات تكامل**: `tests/social.test.mjs` — ٦٧ فحصًا على خادم مزوّد محلي يحاكي نقاط Meta
-  وGoogle نفسها (تبادل الرمز، اكتشاف الصفحات، النشر، الفشل الجزئي، إبطال الرمز، الطابور).
+- **OAuth رسمي**: Meta، Google، LinkedIn (`organizationAcls`)، X (OAuth 2.0 + PKCE، `users/me`)،
+  TikTok (`user/info`)، Snapchat (`/v1/me/organizations`). `state` عشوائي أحادي الاستخدام،
+  مربوط بالمستخدم والشركة، وصلاحيته ١٠ دقائق.
+- **تخزين الرموز**: AES-256-GCM بمفتاح `SOCIAL_TOKEN_KEY` في جدول منفصل؛ لا مسار يعيد الرمز.
+- **عزل الشركات**: كل صف ربط يحمل `company_id`، والشركة تُشتق من العضوية لا من الطلب.
+- **مكتبة منشورات**: نسخة غير قابلة للاستبدال عند كل تعديل، تكييف لكل منصة، أخطاء صريحة،
+  ومعاينة من الخادم.
+- **مراجعة**: `draft → awaiting_approval → approved / changes_requested / rejected` مع سبب إلزامي،
+  و`reviewNote` و`reviewedBy/At` محفوظة. الاسترجاع ينشئ **مسودة جديدة** من نسخة قديمة.
+- **طابور دائم**: مهمة واحدة لكل هدف، Backoff تصاعدي، ومنع النشر المكرر.
+- **حاجز الاشتراك**: كل مسار social يعيد `402 subscription_inactive` لشركة منتهية/معلقة
+  (عدا `super_admin`)، وتعليق الشركة يبطل جلسات أعضائها فورًا.
+- **اختبارات**: `tests/social.test.mjs` — ١٠٢ فحص على خادم مزوّد محلي يحاكي نقاط Meta وGoogle
+  وLinkedIn وX (تبادل الرمز، الاكتشاف، النشر، الفشل الجزئي، إبطال الرمز، الطابور، المراجعة،
+  الاسترجاع، حاجز الاشتراك، موافقات الوصول، وحالات القدرات).
 
-## ٤. ما يحتاج مفاتيح أو موافقات قبل أن يعمل على حساب حقيقي
+## ٤. المتطلبات قبل التشغيل على حساب حقيقي
 
 | المتطلب | الاسم على الخادم | ملاحظات |
 | --- | --- | --- |
-| مفتاح تشفير الرموز | `SOCIAL_TOKEN_KEY` | إلزامي؛ بدونه يرفض الربط (`token_storage_not_configured`). |
-| تطبيق Meta | `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI` | Redirect يجب أن يطابق مسار `/api/company/:companyId/social/oauth/callback`. |
-| وصول متقدم لـ Meta | إعداد `social.access.facebook_page=approved` و`social.access.instagram_business=approved` بعد المراجعة | حتى ذلك تظهر `pending_review`. |
-| تطبيق Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | تفعيل Analytics Admin API وSearch Console API وTag Manager API في المشروع. |
-| وصول Business Profile | طلب وصول من Google + `social.access.google_business_profile=approved` | النشر عبر API يبقى محجوبًا قبل ذلك (`gbp_access_requires_approval`). |
+| تشفير الرموز | `SOCIAL_TOKEN_KEY` | إلزامي؛ بدونه يُرفض الربط. |
+| Meta | `META_APP_ID`, `META_APP_SECRET` | Redirect واحد لكل المنصة: `/api/social/oauth/callback`. |
+| وصول متقدم Meta | `social.access.facebook_page=approved` و`social.access.instagram_business=approved` | يُسجَّل من لوحة المالك بعد المراجعة، مع Audit. |
+| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | نفس الـredirect الواحد؛ تفعيل Analytics Admin / Search Console / Tag Manager. |
+| LinkedIn | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | نفس الـredirect الواحد؛ تطبيق LinkedIn + نطاق Community Management. |
+| X | `X_CLIENT_ID`, `X_CLIENT_SECRET` | نفس الـredirect الواحد؛ OAuth 2.0 مع PKCE. |
+| TikTok | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | نفس الـredirect الواحد؛ مراجعة Content Posting API. |
+| Snapchat | `SNAPCHAT_CLIENT_ID`, `SNAPCHAT_CLIENT_SECRET` | نفس الـredirect الواحد؛ قبول في Marketing API. |
 | مُشغّل المهام | `JOBS_SECRET` | بدونه الجدولة تُحفظ ولا تُنفّذ تلقائيًا. |
-
-**التكلفة المتوقعة**: استدعاءات Graph وGoogle APIs بلا رسوم مباشرة. التكلفة الحقيقية
-في المراجعات (Business Verification) وفي تشغيل مُشغّل دوري (Cron Trigger على حساب Cloudflare
-أو مُجدوِل خارجي) — لا يوجد Cron مهيّأ في استضافة Sites الحالية.
+| رابط عودة مخصّص (اختياري) | `SOCIAL_OAUTH_REDIRECT_URI` | يلزم فقط لنطاق مخصّص أو لتثبيت نطاق واحد؛ وإلا يُشتق من أصل الطلب. |
 
 ## ٥. قيود صريحة
 
-1. **لا جدولة تلقائية على هذه الاستضافة**: الطابور دائم والاستدعاء عبر
-   `POST /api/internal/social/tick` بـ`x-wusool-jobs-secret`، أو يدويًا من داخل الشركة
-   («تشغيل المستحق الآن»). لا ندّعي وجود عامل خلفية دائم.
-2. **لا نشر لـ LinkedIn/TikTok/Snapchat**: بلا مسار تفويض، وتظهر `not_supported`.
-3. **WhatsApp**: لا إرسال حر؛ يحتاج قالبًا معتمدًا وربط رقم أعمال، وهو غير منفّذ هنا.
-4. **Google Business Profile**: القراءة/الاكتشاف منفّذان، أما إنشاء منشور عبر API فمحجوب
-   حتى موافقة Google، ويظهر السبب بدل نجاح وهمي.
-5. **البريد**: الربط لا يحتاج OAuth، لكن الإرسال يحتاج مزوّدًا ودومينًا موثّقًا وموافقة مستلم.
-6. **الإعلانات المدفوعة**: غير منفّذة. لا تُنشأ حملة إعلانية ولا تُدفع ميزانية من حساب المنصة.
-7. **القياس**: لا أرقام أداء تُخترع. حقول الظهور/الوصول/النقرات تُملأ فقط عند جلبها من
-   API المنصة أو GA4 أو إدخال يدوي موثّق (`social_post_metrics.source`).
+1. **لا جدولة تلقائية على Sites**: الطابور دائم، والاستدعاء عبر
+   `POST /api/internal/social/tick` بـ`x-wusool-jobs-secret` أو يدويًا. لا Cron هنا.
+2. **Publishing for LinkedIn/X/TikTok/Snapchat/GBP غير منفّذ**: الربط يعمل، والنشر محجوب
+   باسمه (`publish_not_implemented`) قبل الاعتماد.
+3. **Facebook media غير منفّذ**: الصورة تُحجب قبل الاعتماد بدل نشر النص وحده.
+4. **WhatsApp**: لا إرسال حر؛ يحتاج قالبًا معتمدًا ورقم أعمال.
+5. **الإعلانات المدفوعة**: غير منفّذة، وتظهر كوحدة مستقبلية فقط.
+6. **تحليلات المنصات**: قراءة insights غير منفّذة؛ تُعرض `not_implemented` لا صفرًا.
 
-## ٦. ما تم اختباره فعليًا
+## ٦. ما تم اختباره
 
-- ٢٣٠ فحص تكامل في `npm test` (منها ٦٧ لهذا القسم)، على Worker حقيقي وD1 محلي.
-- تأكيد أن الرموز لا تظهر في أي استجابة، وأن رمز صفحة يُستخدم للنشر بدل رمز المستخدم.
-- تأكيد منع الاعتماد قبل الإرسال، ومنع النشر قبل الاعتماد، ومنع التعديل بعد النشر.
-- تأكيد أن نجاح Facebook لا يُعاد عند فشل Instagram، وأن إبطال الرمز يعلّم الحساب
-  `requires_reconnect` بدل إعادة المحاولة الصامتة.
-- **لم يُختبر** على حساب Meta/Google حقيقي: يلزم حساب أعمال ومفاتيح ومراجعة تطبيق.
+- ٣٢٧ فحصًا في `npm test` (منها ١٠٦ لهذا القسم) على Worker حقيقي وD1 محلي.
+- لا رمز يظهر في أي استجابة؛ رمز الصفحة يُستخدم للنشر.
+- منع الاعتماد قبل الإرسال، ومنع النشر قبل الاعتماد، ومنع التعديل بعد النشر.
+- نجاح هدف لا يُعاد عند فشل آخر، وإبطال الرمز يعلّم الحساب `requires_reconnect`.
+- **لم يُختبر** على حساب حقيقي: يلزم حساب أعمال ومفاتيح ومراجعة تطبيق.

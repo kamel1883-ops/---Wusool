@@ -12,7 +12,7 @@
  * Profile without access approval), the target fails with that documented
  * reason — nothing is simulated and no browser automation is used.
  */
-import { first, getSettings, newId, nowIso, run, type Env } from '../db';
+import { computeSubscription, first, newId, nowIso, run, type Env } from '../db';
 import { PLATFORMS as SPECS, type PlatformKey } from './platforms';
 import { usableToken } from './oauth';
 
@@ -145,6 +145,27 @@ export async function publishTarget(
       externalUrl: target.external_url,
     };
   }
+  // A lapsed tenant cannot publish even if a job survived from before: the
+  // queue is global, so the subscription is checked at send time as well.
+  const company = await first<any>(
+    env,
+    'SELECT id, status, subscription_end FROM companies WHERE id = ?',
+    input.companyId
+  );
+  if (!company) {
+    await markFailed(env, target, 'company_not_found', 'The company no longer exists.');
+    return { status: 'failed', errorCode: 'company_not_found' };
+  }
+  if (!computeSubscription(company).isActive) {
+    await markFailed(
+      env,
+      target,
+      'subscription_inactive',
+      'The company subscription is not active.'
+    );
+    return { status: 'failed', errorCode: 'subscription_inactive' };
+  }
+
   if (!target.connection_id) {
     await markFailed(env, target, 'connection_missing', 'The target has no connected account.');
     return { status: 'failed', errorCode: 'connection_missing' };
@@ -200,14 +221,13 @@ export async function publishTarget(
         media
       );
     } else if (platform === 'google_business_profile') {
-      const settings = await getSettings(env);
-      const granted = settings['social.access.google_business_profile'] === 'approved';
+      // Kept as a hard stop: the adapter blocks the target before approval, so
+      // reaching here means state was forced. Reporting "not implemented" is
+      // the truth; access approval alone never makes a post publishable.
       outcome = {
         status: 'failed',
-        errorCode: granted ? 'publish_not_implemented' : 'gbp_access_requires_approval',
-        errorMessage: granted
-          ? 'Business Profile post creation is not wired in this build.'
-          : 'Google has not granted Business Profile API access for this deployment.',
+        errorCode: 'publish_not_implemented',
+        errorMessage: 'Business Profile post creation is not implemented in this build.',
       };
     } else if (!spec.connector || spec.connector === 'none') {
       outcome = {

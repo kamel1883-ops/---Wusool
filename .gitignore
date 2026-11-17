@@ -10,3 +10,7 @@ dist/
 .push-key.pub
 
 sites-build/
+/freebuff-sites-build/
+
+.secrets/
+artifacts/

@@ -45,12 +45,33 @@ export interface Env {
   SOCIAL_TOKEN_KEY?: string;
   META_APP_ID?: string;
   META_APP_SECRET?: string;
+  /** Optional override; defaults to <origin>/api/social/oauth/callback. */
+  SOCIAL_OAUTH_REDIRECT_URI?: string;
   META_REDIRECT_URI?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_REDIRECT_URI?: string;
+  // Additional official OAuth apps. Without these a channel reports
+  // `requires_credentials`; with them, only the provider's review gates
+  // publishing.
+  LINKEDIN_CLIENT_ID?: string;
+  LINKEDIN_CLIENT_SECRET?: string;
+  LINKEDIN_REDIRECT_URI?: string;
+  X_CLIENT_ID?: string;
+  X_CLIENT_SECRET?: string;
+  X_REDIRECT_URI?: string;
+  TIKTOK_CLIENT_KEY?: string;
+  TIKTOK_CLIENT_SECRET?: string;
+  TIKTOK_REDIRECT_URI?: string;
+  SNAPCHAT_CLIENT_ID?: string;
+  SNAPCHAT_CLIENT_SECRET?: string;
+  SNAPCHAT_REDIRECT_URI?: string;
+  // Salt for the first-party visitor hash (never an IP or a user agent).
+  TRACKING_SALT?: string;
   // Shared secret for the scheduler that drains due publish jobs.
   JOBS_SECRET?: string;
+  /** Arms the one-time /reset-owner page; unset means the page does not exist. */
+  OWNER_RESET_SECRET?: string;
   // Provider base URLs. Only overridden in tests, where a local server stands
   // in for the provider so the real publishing code is exercised end to end.
   SOCIAL_GRAPH_BASE?: string;
@@ -61,6 +82,15 @@ export interface Env {
   SOCIAL_GOOGLE_TOKEN_BASE?: string;
   SOCIAL_GOOGLE_API_BASE?: string;
   SOCIAL_GOOGLE_ADMIN_BASE?: string;
+  SOCIAL_GOOGLE_BIZ_ACCOUNT_BASE?: string;
+  SOCIAL_GOOGLE_BIZ_INFO_BASE?: string;
+  SOCIAL_LINKEDIN_API_BASE?: string;
+  SOCIAL_X_API_BASE?: string;
+  SOCIAL_X_OAUTH_BASE?: string;
+  SOCIAL_TIKTOK_API_BASE?: string;
+  SOCIAL_TIKTOK_OAUTH_BASE?: string;
+  SOCIAL_SNAPCHAT_API_BASE?: string;
+  SOCIAL_SNAPCHAT_ADS_BASE?: string;
 }
 
 export type Row = Record<string, any>;

@@ -14,12 +14,31 @@
  *   `connectionState` — what is true for this company's stored account?
  */
 
+/**
+ * The only states a capability or a platform may claim. `working_test` means
+ * the code path exists and is covered by the mocked-provider suite;
+ * `live_verified` is reserved for a run on a real provider account and is
+ * never set by this build.
+ */
+export type IntegrationState =
+  | 'working_test'
+  | 'requires_credentials'
+  | 'requires_app_review'
+  | 'not_implemented'
+  | 'not_supported'
+  | 'blocked_by_hosting'
+  | 'live_verified';
+
+export type CapabilityKey = keyof PlatformSpec['capabilities'];
+export type CapabilityStates = Record<CapabilityKey, IntegrationState>;
+
 export type PlatformKey =
   | 'facebook_page'
   | 'instagram_business'
   | 'tiktok_business'
   | 'snapchat_business'
   | 'linkedin_org'
+  | 'x_twitter'
   | 'google_business_profile'
   | 'ga4'
   | 'search_console'
@@ -27,7 +46,15 @@ export type PlatformKey =
   | 'email'
   | 'whatsapp_cloud';
 
-export type Connector = 'meta' | 'google' | 'smtp' | 'none';
+export type Connector =
+  | 'meta'
+  | 'google'
+  | 'smtp'
+  | 'linkedin'
+  | 'twitter'
+  | 'tiktok'
+  | 'snapchat'
+  | 'none';
 
 export type MediaKind = 'text' | 'image' | 'video' | 'link';
 
@@ -89,11 +116,13 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
     },
     capabilities: {
       publishText: true,
-      publishImage: true,
-      publishVideo: true,
+      // The publishing engine posts text and links to /feed only. Claiming
+      // image or video here would let the UI promise something we drop.
+      publishImage: false,
+      publishVideo: false,
       nativeScheduling: false,
-      readComments: true,
-      readAnalytics: true,
+      readComments: false,
+      readAnalytics: false,
       ads: false,
     },
     access: {
@@ -104,9 +133,12 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
     limits: {
       textMax: 63206,
       requiresMedia: false,
-      mediaKinds: ['image', 'video'],
+      mediaKinds: [],
       hashtagsMax: null,
-      mediaNote: null,
+      mediaNote: {
+        ar: 'نشر الصور والفيديو على Facebook غير منفّذ بعد في هذه النسخة؛ الصور تُحجب قبل الاعتماد بدل نشر النص وحده.',
+        en: 'Image and video publishing to Facebook is not implemented in this build; media is blocked before approval instead of silently posting text only.',
+      },
     },
   },
   instagram_business: {
@@ -145,8 +177,8 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
       mediaKinds: ['image', 'video'],
       hashtagsMax: 30,
       mediaNote: {
-        ar: 'الـAPI الرسمي ينشر بوسائط مستضافة على رابط عام (JPEG للصور)، ولا يقبل نصًا بلا صورة أو فيديو.',
-        en: 'The official API publishes media hosted at a public URL (JPEG for images) and rejects text-only posts.',
+        ar: 'الـAPI الرسمي ينشر وسيطًا واحدًا مستضافًا على رابط عام (JPEG للصور)، ولا يقبل نصًا بلا صورة أو فيديو. المنشورات المتعددة الصور (Carousel) غير مدعومة بعد.',
+        en: 'The official API publishes one item hosted at a public URL (JPEG for images) and rejects text-only posts. Carousels are not supported yet.',
       },
     },
   },
@@ -154,7 +186,7 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
     key: 'tiktok_business',
     name: { ar: 'TikTok Business', en: 'TikTok Business' },
     category: 'social',
-    connector: 'none',
+    connector: 'tiktok',
     accountRequirement: {
       ar: 'حساب أعمال على TikTok مع تطبيق مطوّر معتمد للنشر',
       en: 'A TikTok business account with an approved developer app for publishing',
@@ -191,7 +223,7 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
     key: 'snapchat_business',
     name: { ar: 'Snapchat Business', en: 'Snapchat Business' },
     category: 'social',
-    connector: 'none',
+    connector: 'snapchat',
     accountRequirement: {
       ar: 'حساب أعمال وملف عام (Public Profile) مع وصول لـMarketing API',
       en: 'A business account and Public Profile with Marketing API access',
@@ -228,7 +260,7 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
     key: 'linkedin_org',
     name: { ar: 'صفحة LinkedIn للمؤسسة', en: 'LinkedIn Organization Page' },
     category: 'social',
-    connector: 'none',
+    connector: 'linkedin',
     accountRequirement: {
       ar: 'صفحة مؤسسة ودور مسؤول عليها',
       en: 'An organization page and an admin role on it',
@@ -256,6 +288,43 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
       mediaKinds: ['image', 'video'],
       hashtagsMax: null,
       mediaNote: null,
+    },
+  },
+  x_twitter: {
+    key: 'x_twitter',
+    name: { ar: 'X / Twitter', en: 'X / Twitter' },
+    category: 'social',
+    connector: 'twitter',
+    accountRequirement: {
+      ar: 'حساب X مع وصول لـAPI v2 (الكتابة تحتاج خطة مدفوعة)',
+      en: 'An X account with API v2 access (writing needs a paid tier)',
+    },
+    capabilities: {
+      publishText: true,
+      publishImage: false,
+      publishVideo: false,
+      nativeScheduling: false,
+      readComments: false,
+      readAnalytics: false,
+      ads: false,
+    },
+    access: {
+      reviewRequired: true,
+      reviewNote: {
+        ar: 'OAuth 2.0 مع PKCE متاح، لكن النشر عبر /2/tweets يحتاج وصولًا مدفوعًا للـAPI. الربط يعمل، والنشر يظهر «غير منفّذ» حتى يُفعّل الوصول.',
+        en: 'OAuth 2.0 with PKCE is available, but posting through /2/tweets needs paid API access. Connecting works; publishing stays “not implemented” until that access is active.',
+      },
+      scopes: ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+    },
+    limits: {
+      textMax: 280,
+      requiresMedia: false,
+      mediaKinds: [],
+      hashtagsMax: null,
+      mediaNote: {
+        ar: 'حد النص ٢٨٠ حرفًا. نشر الوسائط على X غير منفّذ في هذه النسخة.',
+        en: 'The text limit is 280 characters. Media publishing on X is not implemented in this build.',
+      },
     },
   },
   google_business_profile: {
@@ -331,7 +400,7 @@ export const PLATFORMS: Record<PlatformKey, PlatformSpec> = {
       publishVideo: false,
       nativeScheduling: false,
       readComments: false,
-      readAnalytics: true,
+      readAnalytics: false,
       ads: false,
     },
     access: { reviewRequired: false, reviewNote: GOOGLE_REVIEW, scopes: ['https://www.googleapis.com/auth/webmasters.readonly'] },
@@ -444,6 +513,7 @@ export const PLATFORM_ORDER: PlatformKey[] = [
   'tiktok_business',
   'snapchat_business',
   'linkedin_org',
+  'x_twitter',
   'google_business_profile',
   'ga4',
   'search_console',
@@ -455,6 +525,10 @@ export const PLATFORM_ORDER: PlatformKey[] = [
 export const PLATFORMS_WITH_OAUTH: PlatformKey[] = [
   'facebook_page',
   'instagram_business',
+  'tiktok_business',
+  'snapchat_business',
+  'linkedin_org',
+  'x_twitter',
   'google_business_profile',
   'ga4',
   'search_console',
@@ -480,6 +554,14 @@ export type DeploymentEnv = {
   META_APP_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  LINKEDIN_CLIENT_ID?: string;
+  LINKEDIN_CLIENT_SECRET?: string;
+  X_CLIENT_ID?: string;
+  X_CLIENT_SECRET?: string;
+  TIKTOK_CLIENT_KEY?: string;
+  TIKTOK_CLIENT_SECRET?: string;
+  SNAPCHAT_CLIENT_ID?: string;
+  SNAPCHAT_CLIENT_SECRET?: string;
   EMAIL_API_KEY?: string;
   EMAIL_FROM?: string;
 };
@@ -489,16 +571,40 @@ export function connectorConfig(env: DeploymentEnv) {
   const meta = Boolean(env.META_APP_ID && env.META_APP_SECRET);
   const google = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
   const email = Boolean(env.EMAIL_API_KEY && env.EMAIL_FROM);
+  const linkedin = Boolean(env.LINKEDIN_CLIENT_ID && env.LINKEDIN_CLIENT_SECRET);
+  const twitter = Boolean(env.X_CLIENT_ID && env.X_CLIENT_SECRET);
+  const tiktok = Boolean(env.TIKTOK_CLIENT_KEY && env.TIKTOK_CLIENT_SECRET);
+  const snapchat = Boolean(env.SNAPCHAT_CLIENT_ID && env.SNAPCHAT_CLIENT_SECRET);
   return {
     meta: {
       configured: meta,
       clientId: meta ? String(env.META_APP_ID) : null,
-      requires: ['META_APP_ID', 'META_APP_SECRET', 'META_REDIRECT_URI'],
+      requires: ['META_APP_ID', 'META_APP_SECRET', 'SOCIAL_OAUTH_REDIRECT_URI'],
     },
     google: {
       configured: google,
       clientId: google ? String(env.GOOGLE_CLIENT_ID) : null,
-      requires: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI'],
+      requires: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'SOCIAL_OAUTH_REDIRECT_URI'],
+    },
+    linkedin: {
+      configured: linkedin,
+      clientId: linkedin ? String(env.LINKEDIN_CLIENT_ID) : null,
+      requires: ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET', 'SOCIAL_OAUTH_REDIRECT_URI'],
+    },
+    twitter: {
+      configured: twitter,
+      clientId: twitter ? String(env.X_CLIENT_ID) : null,
+      requires: ['X_CLIENT_ID', 'X_CLIENT_SECRET', 'SOCIAL_OAUTH_REDIRECT_URI'],
+    },
+    tiktok: {
+      configured: tiktok,
+      clientId: tiktok ? String(env.TIKTOK_CLIENT_KEY) : null,
+      requires: ['TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET', 'SOCIAL_OAUTH_REDIRECT_URI'],
+    },
+    snapchat: {
+      configured: snapchat,
+      clientId: snapchat ? String(env.SNAPCHAT_CLIENT_ID) : null,
+      requires: ['SNAPCHAT_CLIENT_ID', 'SNAPCHAT_CLIENT_SECRET', 'SOCIAL_OAUTH_REDIRECT_URI'],
     },
     email: {
       configured: email,
@@ -542,8 +648,11 @@ export function availabilityOf(
           reviewPending: false,
         };
   }
-  const config = connectorConfig(env);
-  const app = spec.connector === 'meta' ? config.meta : config.google;
+  const config = connectorConfig(env) as Record<string, { configured: boolean; requires: string[] }>;
+  const app = config[spec.connector] ?? {
+    configured: false,
+    requires: [`${spec.connector.toUpperCase()}_CLIENT_ID`, `${spec.connector.toUpperCase()}_CLIENT_SECRET`],
+  };
   if (!app.configured) {
     return {
       state: 'requires_credentials',
@@ -586,4 +695,112 @@ export function tokenStatusOf(
   if (expires <= now) return 'expired';
   if (expires - now <= EXPIRING_DAYS * 86_400_000) return 'expiring';
   return 'connected';
+}
+
+
+// ---------------------------------------------------------------------------
+// Honest state per platform and per capability
+// ---------------------------------------------------------------------------
+
+const ALL_NOT_SUPPORTED: CapabilityStates = {
+  publishText: 'not_supported',
+  publishImage: 'not_supported',
+  publishVideo: 'not_supported',
+  nativeScheduling: 'not_supported',
+  readComments: 'not_supported',
+  readAnalytics: 'not_supported',
+  ads: 'not_supported',
+};
+
+/**
+ * What each capability actually does in this build. Kept next to the
+ * capability booleans so a claim can never drift away from the code: a `true`
+ * is only set where the publishing engine has a tested path.
+ */
+export const CAPABILITY_STATES: Record<PlatformKey, CapabilityStates> = {
+  facebook_page: {
+    publishText: 'working_test',
+    publishImage: 'not_implemented',
+    publishVideo: 'not_implemented',
+    nativeScheduling: 'not_supported',
+    readComments: 'not_implemented',
+    readAnalytics: 'not_implemented',
+    ads: 'not_supported',
+  },
+  instagram_business: {
+    publishText: 'not_supported',
+    publishImage: 'working_test',
+    publishVideo: 'working_test',
+    nativeScheduling: 'not_supported',
+    readComments: 'not_implemented',
+    readAnalytics: 'not_implemented',
+    ads: 'not_supported',
+  },
+  tiktok_business: {
+    ...ALL_NOT_SUPPORTED,
+    publishVideo: 'not_implemented',
+    readAnalytics: 'not_implemented',
+  },
+  snapchat_business: {
+    ...ALL_NOT_SUPPORTED,
+    publishVideo: 'not_implemented',
+    readAnalytics: 'not_implemented',
+  },
+  linkedin_org: {
+    ...ALL_NOT_SUPPORTED,
+    publishText: 'not_implemented',
+    publishImage: 'not_implemented',
+    publishVideo: 'not_implemented',
+    readAnalytics: 'not_implemented',
+  },
+  x_twitter: {
+    ...ALL_NOT_SUPPORTED,
+    publishText: 'not_implemented',
+  },
+  google_business_profile: {
+    ...ALL_NOT_SUPPORTED,
+    publishText: 'not_implemented',
+    publishImage: 'not_implemented',
+    readAnalytics: 'not_implemented',
+  },
+  ga4: { ...ALL_NOT_SUPPORTED, readAnalytics: 'not_implemented' },
+  search_console: { ...ALL_NOT_SUPPORTED, readAnalytics: 'not_implemented' },
+  google_tag_manager: { ...ALL_NOT_SUPPORTED, readAnalytics: 'not_implemented' },
+  email: { ...ALL_NOT_SUPPORTED, publishText: 'working_test', publishImage: 'working_test' },
+  whatsapp_cloud: ALL_NOT_SUPPORTED,
+};
+
+export const capabilityStatesOf = (key: PlatformKey): CapabilityStates => CAPABILITY_STATES[key];
+
+/**
+ * The single state shown for a channel. It answers "what can this deployment
+ * do with this channel right now", not "what is this platform capable of".
+ */
+export function platformStateOf(
+  key: PlatformKey,
+  env: DeploymentEnv,
+  settings: Record<string, string>
+): IntegrationState {
+  const spec = PLATFORMS[key];
+  if (spec.connector === 'none') return 'not_supported';
+  const approved = settings[`social.access.${key}`] === 'approved';
+
+  if (spec.connector === 'smtp') {
+    return connectorConfig(env).email.configured ? 'working_test' : 'requires_credentials';
+  }
+
+  const config = connectorConfig(env) as Record<string, { configured: boolean }>;
+  const app = config[spec.connector];
+  if (!app?.configured) return 'requires_credentials';
+
+  // Discovery of a Google Tag Manager account is not a working integration:
+  // no container is read or written, so it is reported as not implemented.
+  if (key === 'google_tag_manager') return 'not_implemented';
+
+  if (spec.access.reviewRequired && !approved) return 'requires_app_review';
+  // A channel is only "working in test" when at least one capability has a
+  // tested path. Connected-but-publishing-not-implemented stays honest.
+  return Object.values(CAPABILITY_STATES[key]).some((state) => state === 'working_test')
+    ? 'working_test'
+    : 'not_implemented';
 }

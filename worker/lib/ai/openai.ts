@@ -22,6 +22,13 @@ const BACKOFF_MS = [900, 2200];
 // Hosted open models can take well over a minute for a full report; too short
 // a timeout turns a slow success into a hard "unreachable" failure.
 const CHAT_TIMEOUT_MS = 90_000;
+/**
+ * The report JSON is large. Workers AI and some gateways default to a small
+ * output budget (a few hundred tokens), which truncates the object mid-way and
+ * surfaces as "invalid response"; asking for a full report explicitly avoids
+ * that false failure.
+ */
+const MAX_OUTPUT_TOKENS = 3_000;
 
 export type OpenAIOptions = { apiKey: string; baseUrl: string; model: string };
 
@@ -149,6 +156,24 @@ export const isRetryableAiError = (error: unknown) =>
     error.code
   );
 
+/**
+ * True when the configured gateway is a usable absolute http(s) URL.
+ *
+ * A missing scheme, a stray space or newline pasted into the secret all make
+ * `fetch` throw a TypeError, which the old code reported as "unreachable" —
+ * indistinguishable from a real network failure. Checking first gives the
+ * operator a precise, actionable code instead.
+ */
+export const isUsableGatewayUrl = (value: string) => {
+  if (!value || /\s/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
 export class OpenAIProvider implements AIProvider {
   readonly name = 'openai';
 
@@ -163,6 +188,9 @@ export class OpenAIProvider implements AIProvider {
   }
 
   private async postChat(body: Record<string, unknown>): Promise<any> {
+    if (!isUsableGatewayUrl(this.options.baseUrl)) {
+      throw new ProviderError('ai_gateway_url_invalid');
+    }
     let response: Response;
     try {
       response = await fetch(this.endpoint('/chat/completions'), {
@@ -174,26 +202,34 @@ export class OpenAIProvider implements AIProvider {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
       });
-    } catch {
+    } catch (error) {
       // Never surface the upstream error text (it can echo the request).
-      throw new ProviderError('ai_provider_unreachable');
+      throw new ProviderError(
+        error instanceof TypeError ? 'ai_gateway_url_invalid' : 'ai_provider_unreachable'
+      );
     }
     if (!response.ok) throw classifyHttpError(response.status);
     const payload: any = await response.json().catch(() => null);
-    const content = payload?.choices?.[0]?.message?.content;
+    const choice = payload?.choices?.[0];
+    const content = choice?.message?.content;
+    const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
     if (typeof content !== 'string' || !content.trim()) {
-      throw new ProviderError('ai_invalid_response');
+      throw new ProviderError(
+        finishReason === 'length' ? 'ai_output_truncated' : 'ai_invalid_response'
+      );
     }
-    return { payload, content };
+    return { payload, content, finishReason };
   }
 
   async analyzeSite(input: AnalyzeInput): Promise<AiAnalysis> {
     if (!this.options.apiKey) throw new ProviderError('ai_provider_not_configured');
 
+    const workersAiModel = /^@cf\//i.test(this.options.model);
     const body = {
       model: this.options.model,
       temperature: 0.2,
-      response_format: { type: 'json_object' },
+      max_tokens: MAX_OUTPUT_TOKENS,
+      ...(workersAiModel ? {} : { response_format: { type: 'json_object' } }),
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(input) },
@@ -203,8 +239,14 @@ export class OpenAIProvider implements AIProvider {
     let lastError: unknown = new ProviderError('ai_provider_failed');
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       try {
-        const { payload, content } = await this.postChat(body);
-        const parsed = extractJsonObject(content);
+        const { payload, content, finishReason } = await this.postChat(body);
+        let parsed: unknown;
+        try {
+          parsed = extractJsonObject(content);
+        } catch (error) {
+          if (finishReason === 'length') throw new ProviderError('ai_output_truncated');
+          throw error;
+        }
         const inputTokens = Number(payload?.usage?.prompt_tokens ?? 0) || 0;
         const outputTokens = Number(payload?.usage?.completion_tokens ?? 0) || 0;
         return {
@@ -255,6 +297,7 @@ const upstreamErrorCode = async (response: Response): Promise<number | undefined
  */
 export async function testOpenAIConnection(options: OpenAIOptions): Promise<ConnectionTestOutcome> {
   if (!options.apiKey) return { ok: false, code: 'ai_provider_not_configured' };
+  if (!isUsableGatewayUrl(options.baseUrl)) return { ok: false, code: 'ai_gateway_url_invalid' };
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   let response: Response;
   try {
@@ -263,8 +306,11 @@ export async function testOpenAIConnection(options: OpenAIOptions): Promise<Conn
       headers: { authorization: `Bearer ${options.apiKey}` },
       signal: AbortSignal.timeout(20_000),
     });
-  } catch {
-    return { ok: false, code: 'ai_provider_unreachable' };
+  } catch (error) {
+    return {
+      ok: false,
+      code: error instanceof TypeError ? 'ai_gateway_url_invalid' : 'ai_provider_unreachable',
+    };
   }
   if (response.ok) {
     const payload: any = await response.json().catch(() => null);
@@ -299,8 +345,11 @@ export async function testOpenAIConnection(options: OpenAIOptions): Promise<Conn
       }),
       signal: AbortSignal.timeout(30_000),
     });
-  } catch {
-    return { ok: false, code: 'ai_provider_unreachable' };
+  } catch (error) {
+    return {
+      ok: false,
+      code: error instanceof TypeError ? 'ai_gateway_url_invalid' : 'ai_provider_unreachable',
+    };
   }
   if (!chatResponse.ok) {
     return {

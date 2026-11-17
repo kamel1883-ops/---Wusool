@@ -7,7 +7,7 @@
  * client has to resolve, and a platform that cannot take the post is blocked
  * with the documented reason rather than skipped quietly.
  */
-import { PLATFORMS, type PlatformKey } from './platforms';
+import { capabilityStatesOf, PLATFORMS, type PlatformKey } from './platforms';
 
 export type PostMedia = {
   url: string;
@@ -67,13 +67,40 @@ export function adaptPost(post: PostInput, platform: PlatformKey): Adapted {
   const baseBody = (post.language === 'en' ? post.bodyEn : post.bodyAr) || post.bodyAr || post.bodyEn;
   if (!baseBody.trim()) issues.push({ code: 'body_required' });
 
+  // A channel whose publishing path does not exist is blocked by name, so the
+  // client sees why instead of a generic "not publishable".
+  if (platform === 'google_business_profile') {
+    issues.push({ code: 'gbp_publish_not_implemented' });
+    return { status: 'blocked', text: '', subject: null, media: [], issues, notes };
+  }
+
   if (!spec.capabilities.publishText && !spec.capabilities.publishImage && !spec.capabilities.publishVideo) {
     issues.push({ code: 'platform_not_publishable' });
     return { status: 'blocked', text: '', subject: null, media: [], issues, notes };
   }
 
+  // The platform may document publishing and this build may still not
+  // implement it (LinkedIn, X, TikTok, Snapchat). Such a target is blocked by
+  // name so approval cannot happen and no false success can be recorded.
+  const states = capabilityStatesOf(platform);
+  const publishableHere =
+    states.publishText === 'working_test' ||
+    states.publishImage === 'working_test' ||
+    states.publishVideo === 'working_test';
+  if (!publishableHere) {
+    issues.push({ code: 'publish_not_implemented' });
+    return { status: 'blocked', text: '', subject: null, media: [], issues, notes };
+  }
+
+  // Facebook: the engine posts to /feed (text + link) only. Media is refused
+  // here rather than dropped at publish time.
+  const facebookMedia = platform === 'facebook_page' ? post.media : [];
+  if (facebookMedia.length) {
+    issues.push({ code: 'facebook_media_not_supported' });
+  }
+
   // Media: only kinds the platform documents, images before video.
-  const allowedMedia = post.media.filter((item) => {
+  const allowedMedia = (platform === 'facebook_page' ? [] : post.media).filter((item) => {
     if (!isHttpUrl(item.url)) {
       issues.push({ code: 'media_url_invalid', detail: item.url });
       return false;
@@ -85,11 +112,13 @@ export function adaptPost(post: PostInput, platform: PlatformKey): Adapted {
     return true;
   });
 
+  // Instagram carousels need child containers; this build publishes one item.
+  if (platform === 'instagram_business' && allowedMedia.length > 1) {
+    issues.push({ code: 'instagram_carousel_not_supported', detail: String(allowedMedia.length) });
+  }
+
   if (spec.limits.requiresMedia && allowedMedia.length === 0) {
     issues.push({ code: 'media_required' });
-  }
-  if (platform === 'google_business_profile' && allowedMedia.length > 1) {
-    issues.push({ code: 'media_single_allowed' });
   }
   if (platform === 'instagram_business') {
     const nonJpeg = allowedMedia.filter(
@@ -108,7 +137,7 @@ export function adaptPost(post: PostInput, platform: PlatformKey): Adapted {
   if (spec.limits.hashtagsMax !== null && tagCount > spec.limits.hashtagsMax) {
     notes.push(`hashtags_trimmed_to_${spec.limits.hashtagsMax}`);
   }
-  const withTags = platform === 'google_business_profile' ? baseBody.trim() : [baseBody.trim(), tags].filter(Boolean).join('\n\n');
+  const withTags = [baseBody.trim(), tags].filter(Boolean).join('\n\n');
 
   // Links: some platforms turn a bare URL into a preview, others (Instagram)
   // do not allow clickable links in the caption, so we state that plainly.
@@ -123,10 +152,6 @@ export function adaptPost(post: PostInput, platform: PlatformKey): Adapted {
     issues.push({ code: 'link_invalid' });
   }
 
-  if (post.ctaLabel.trim() && platform === 'google_business_profile') {
-    notes.push('gbp_cta_requires_supported_type');
-  }
-
   if (text.length > spec.limits.textMax) {
     issues.push({
       code: 'text_too_long',
@@ -137,10 +162,6 @@ export function adaptPost(post: PostInput, platform: PlatformKey): Adapted {
   if (platform === 'whatsapp_cloud') {
     issues.push({ code: 'template_required' });
   }
-  if (platform === 'google_business_profile') {
-    issues.push({ code: 'gbp_access_requires_approval' });
-  }
-
   return {
     status: issues.length ? 'blocked' : 'ready',
     text,

@@ -27,6 +27,7 @@ import {
 } from './pages/CompanyPages';
 import { CompanyGrowthPage } from './pages/GrowthPages';
 import { CompanySocialPage } from './pages/SocialPages';
+import { CompanyPaidAdsPage, CompanyTrackingPage } from './pages/TrackingPages';
 import {
   AnalysisDetailPage,
   CompanyAnalysesPage,
@@ -113,6 +114,8 @@ export default function App() {
             <Route index element={<CompanyDashboardPage />} />
             <Route path="growth" element={<CompanyGrowthPage />} />
             <Route path="social" element={<CompanySocialPage />} />
+            <Route path="tracking" element={<CompanyTrackingPage />} />
+            <Route path="paid" element={<CompanyPaidAdsPage />} />
             <Route path="analyses" element={<CompanyAnalysesPage />} />
             <Route path="analyses/new" element={<NewAnalysisPage />} />
             <Route path="analyses/:analysisId" element={<AnalysisDetailPage />} />

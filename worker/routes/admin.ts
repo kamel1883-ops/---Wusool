@@ -1092,7 +1092,27 @@ app.get('/audit', async (c) => {
   });
 });
 
-const SETTINGS_PREFIXES = ['brand.', 'support.', 'billing.', 'owner.', 'subscription.', 'platform.', 'analysis.'];
+const SETTINGS_PREFIXES = [
+  'brand.',
+  'support.',
+  'billing.',
+  'owner.',
+  'subscription.',
+  'platform.',
+  'analysis.',
+  // Provider access approvals are operator facts, not customer settings, so
+  // they are editable here by a Super Admin instead of by a manual DB write.
+  'social.',
+];
+
+/** Channels whose access level can be recorded by the operator. */
+const SOCIAL_ACCESS_KEYS = new Set([
+  'social.access.facebook_page',
+  'social.access.instagram_business',
+  'social.access.google_business_profile',
+]);
+
+const SOCIAL_ACCESS_VALUES = new Set(['approved', 'pending']);
 const RESERVED_SETTING_KEYS = new Set(['platform.setup_completed']);
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -1150,6 +1170,17 @@ app.patch('/settings', async (c) => {
       patch[key] = String(Math.round(days));
       continue;
     }
+    if (key.startsWith('social.access.')) {
+      // Recording an approval is not a substitute for the provider's own
+      // review: it only stops the UI from claiming the access is unconfirmed.
+      if (!SOCIAL_ACCESS_KEYS.has(key)) return apiError(c, 422, 'invalid_setting_key', { key });
+      if (!SOCIAL_ACCESS_VALUES.has(value)) {
+        return apiError(c, 422, 'invalid_setting_value', { key });
+      }
+      patch[key] = value;
+      continue;
+    }
+    if (key.startsWith('social.')) return apiError(c, 422, 'invalid_setting_key', { key });
     patch[key] = value;
   }
 
@@ -1166,7 +1197,18 @@ app.patch('/settings', async (c) => {
       },
     });
   }
+  const socialAccess = Object.entries(patch).filter(([key]) => key.startsWith('social.access.'));
   await setSettings(c.env, patch);
+  for (const [key, value] of socialAccess) {
+    await audit(c.env, {
+      actorUserId: actor.id,
+      actorEmail: actor.email,
+      action: 'settings.social_access_updated',
+      entityType: 'platform_settings',
+      entityId: key,
+      meta: { platform: key.replace('social.access.', ''), access: value },
+    });
+  }
   await audit(c.env, {
     actorUserId: actor.id,
     actorEmail: actor.email,

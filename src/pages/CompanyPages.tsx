@@ -13,6 +13,7 @@ import {
 import { useSession } from '../lib/session';
 import { errorKey, formatBytes, formatDate, formatDateTime, formatSAR } from '../lib/i18n';
 import { AppShell, FullPageLoading, type NavItem } from '../components/Shell';
+import { PerformancePanel } from './TrackingPages';
 import {
   Alert,
   Button,
@@ -73,6 +74,12 @@ export function CompanyLayout() {
         : []),
       ...(permissions.includes('social.manage') || permissions.includes('content.create')
         ? [{ to: `${base}/social`, label: t('nav.social'), icon: 'share' as const }]
+        : []),
+      ...(permissions.includes('leads.manage') || permissions.includes('reports.view')
+        ? [{ to: `${base}/tracking`, label: t('nav.tracking'), icon: 'chart' as const }]
+        : []),
+      ...(permissions.includes('leads.manage')
+        ? [{ to: `${base}/paid`, label: t('nav.paid'), icon: 'card' as const }]
         : []),
       { to: `${base}/company`, label: t('nav.company'), icon: 'building' },
       { to: `${base}/team`, label: t('nav.team'), icon: 'users' },
@@ -168,15 +175,23 @@ export function CompanyDashboardPage() {
     return null;
   })();
 
+  // Every card points at the screen that actually implements the module, and
+  // its label states the real limit instead of a phase number.
+  const perms = overview.permissions;
+  const base = `/app/${company.id}`;
+  const canAnalysis = perms.some((permission) => permission.startsWith('analysis.'));
+  const canLeads = perms.includes('leads.manage');
+  const canSocial = perms.includes('social.manage') || perms.includes('content.create');
+  const canReports = canLeads || perms.includes('reports.view');
   const modules: Array<{ key: string; phase: string; to?: string }> = [
-    { key: 'siteAnalysis', phase: 'module.available', to: 'analyses' },
-    { key: 'growth', phase: 'module.available', to: 'growth' },
-    { key: 'social', phase: 'module.available', to: 'social' },
-    { key: 'strategy', phase: 'module.phase3' },
-    { key: 'content', phase: 'module.phase3' },
-    { key: 'design', phase: 'module.phase4' },
-    { key: 'messaging', phase: 'module.phase5' },
-    { key: 'reports', phase: 'module.phase6' },
+    { key: 'siteAnalysis', phase: 'module.available', to: canAnalysis ? `${base}/analyses` : undefined },
+    { key: 'strategy', phase: 'module.inReport', to: canAnalysis ? `${base}/analyses` : undefined },
+    { key: 'growth', phase: 'module.availableManual', to: canLeads ? `${base}/growth` : undefined },
+    { key: 'social', phase: 'module.available', to: canSocial ? `${base}/social` : undefined },
+    { key: 'content', phase: 'module.availableManual', to: canSocial ? `${base}/social?tab=library` : undefined },
+    { key: 'design', phase: 'module.available', to: canSocial ? `${base}/social?tab=posters` : undefined },
+    { key: 'messaging', phase: 'module.gated', to: canLeads ? `${base}/growth?tab=channels` : undefined },
+    { key: 'reports', phase: 'module.internalOnly', to: canReports ? `${base}/tracking` : undefined },
   ];
 
   return (
@@ -206,6 +221,8 @@ export function CompanyDashboardPage() {
           {statusMessage}
         </Alert>
       ) : null}
+
+      <PerformancePanel companyId={company.id} />
 
       <div className="grid-2">
         <Card title={t('dash.subscription')}>
@@ -287,32 +304,35 @@ export function CompanyDashboardPage() {
         )}
       </Card>
 
-      <Card title={t('dash.nextPhases')} subtitle={t('dash.nextPhasesNote')}>
+      <Card title={t('dash.nextPhases')} subtitle={t('dash.nextPhasesNote')}  >
         <div className="module-grid">
-          {modules.map((module) => (
-            (() => {
-              const inner = (
-                <>
-                  <div className="module-card-head">
-                    <strong>{t(`module.${module.key}`)}</strong>
-                    <span className="tag">{t(module.phase)}</span>
-                  </div>
-                  {module.key === 'siteAnalysis' && (usage.site_analysis ?? 0) > 0 ? (
-                    <span className="muted small">{usage.site_analysis}</span>
-                  ) : null}
-                </>
-              );
-              return module.to ? (
-                <Link className="module-card module-card-link" key={module.key} to={module.to}>
-                  {inner}
-                </Link>
-              ) : (
-                <div className="module-card" key={module.key}>
-                  {inner}
+          {modules.map((module) => {
+            const inner = (
+              <>
+                <div className="module-card-head">
+                  <strong>{t(`module.${module.key}`)}</strong>
+                  <span
+                    className={`tag${module.phase === 'module.available' || module.phase === 'module.availableManual' ? '' : ' tag-muted'}`}
+                  >
+                    {t(module.phase)}
+                  </span>
                 </div>
-              );
-            })()
-          ))}
+                <span className="muted small">{t(`module.${module.key}.hint`)}</span>
+                {module.key === 'siteAnalysis' && (usage.site_analysis ?? 0) > 0 ? (
+                  <span className="muted small">{usage.site_analysis}</span>
+                ) : null}
+              </>
+            );
+            return module.to ? (
+              <Link className="module-card module-card-link" key={module.key} to={module.to}>
+                {inner}
+              </Link>
+            ) : (
+              <div className="module-card" key={module.key}>
+                {inner}
+              </div>
+            );
+          })}
         </div>
       </Card>
     </>

@@ -212,3 +212,38 @@ report_snapshots(id, company_id, period, metrics_json, generated_at)
 - كل جدول محتوى يحمل `status` + `approved_by` + `approved_at` + `version` لتطبيق الاعتماد البشري.
 - `analysis_findings.source` يمنع عرض الاستنتاج كحقيقة مستخرجة.
 - لا مفاتيح API في الجداول؛ فقط إشارة إلى اسم السر (`secret_ref`) في `ai_providers`.
+
+### جداول منفّذة إضافية (0007–0010)
+
+```sql
+-- 0007/0008: الحسابات الاجتماعية والنشر
+social_connections(id, company_id, platform, account_id, page_id, profile_id, account_name,
+  account_type, token_status, scopes_json, granted_scopes_json, connected_by, connected_at,
+  expires_at, last_sync_at, last_error, metadata_json)
+social_tokens(connection_id, access_token_enc, refresh_token_enc, key_version)  -- مشفّر فقط
+oauth_states(state, company_id, platform, user_id, code_verifier, redirect_uri, created_at,
+  expires_at, consumed_at, pending_token_enc, pending_accounts_json)
+social_posts(id, company_id, title, body_ar, body_en, link_url, cta_label, hashtags, media_json,
+  language, status, version, scheduled_at, submitted_by/at, approved_by/at, review_note,
+  reviewed_by, reviewed_at, published_at)
+social_post_targets(id, post_id, company_id, connection_id, platform, account_name,
+  adapted_text, adapted_json, status, external_id, external_url, error_code, error_message,
+  attempts, last_attempt_at, published_at)  -- UNIQUE(connection_id, post_id)
+social_post_versions(id, post_id, company_id, version, snapshot_json, created_by, reason)
+social_jobs(id, company_id, target_id, state, run_at, attempts, max_attempts, last_error)  -- UNIQUE(target_id)
+social_events(id, company_id, post_id, target_id, connection_id, kind, detail, actor_user_id)
+
+-- 0009: القياس الداخلي
+tracking_links(id, company_id, campaign_id, post_id, platform, code UNIQUE, label,
+  destination_url, utm_*, status, created_by)
+tracking_events(id, company_id, link_id, lead_id, post_id, campaign_id, kind, platform,
+  occurred_at, period_date, visitor_hash, country, device, referrer_host, metadata_json)
+-- leads.tracking_link_id يربط العميل المحتمل بالرابط الذي أنتجه
+
+-- 0010: البوسترات
+poster_drafts(id, company_id, title, headline, subhead, cta, template, size_key, width, height,
+  brand_color, language, status /* draft|approved|archived */, version, created_by,
+  approved_by, approved_at)
+```
+
+`tracking_events` لا يحمل عنوان IP ولا User-Agent؛ يحمل `visitor_hash` مملّحًا لعدّ الزوار فقط.

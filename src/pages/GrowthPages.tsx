@@ -154,7 +154,13 @@ export function CompanyGrowthPage() {
     companyId ? `/api/company/${companyId}/growth` : null
   );
 
-  const [tab, setTab] = useState('icp');
+  // Deep links from the workspace cards: ?tab=channels.
+  const [tab, setTab] = useState(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    return wanted && ['icp', 'sources', 'leads', 'campaigns', 'channels', 'results'].includes(wanted)
+      ? wanted
+      : 'icp';
+  });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'danger' | 'info'; text: string } | null>(null);
   const [showLeadForm, setShowLeadForm] = useState(false);

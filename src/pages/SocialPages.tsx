@@ -40,6 +40,9 @@ type PlatformInfo = {
   limits: { textMax: number; requiresMedia: boolean; hashtagsMax: number | null };
   publishable: boolean;
   oauthImplemented: boolean;
+  /** What this build actually does with the channel. */
+  state: string;
+  capabilityStates: Record<string, string>;
   availability: 'available' | 'requires_credentials' | 'pending_review' | 'not_supported';
   availabilityReasons: string[];
   accessApproved: boolean;
@@ -72,8 +75,10 @@ type Overview = {
     meta: { configured: boolean; requires: string[] };
     google: { configured: boolean; requires: string[] };
     email: { configured: boolean; requires: string[] };
-    scheduler: 'configured' | 'not_configured';
+    scheduler: { state: string; execution: string; automatic: boolean };
   };
+  analytics: { state: string; note: string };
+  subscription: { status: string; isActive: boolean; daysLeft: number | null };
   stats: {
     connections: number;
     needsReconnect: number;
@@ -117,6 +122,8 @@ type PostRow = {
   scheduledAt: string | null;
   approvedAt: string | null;
   submittedAt: string | null;
+  reviewNote: string | null;
+  reviewedAt: string | null;
   publishedAt: string | null;
   createdAt: string;
   targets: Target[];
@@ -164,7 +171,11 @@ const toLocalInput = (iso: string | null) => {
 export function CompanySocialPage() {
   const { companyId } = useParams();
   const { t, locale } = useSession();
-  const [tab, setTab] = useState('accounts');
+  // Deep links from the workspace cards: ?tab=library / ?tab=posters.
+  const [tab, setTab] = useState(() => {
+    const wanted = new URLSearchParams(window.location.search).get('tab');
+    return wanted && ['accounts', 'library', 'queue', 'posters'].includes(wanted) ? wanted : 'accounts';
+  });
   const [overview, setOverview] = useState<Overview | null>(null);
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -336,6 +347,7 @@ export function CompanySocialPage() {
     { id: 'accounts', label: t('social.tab.accounts') },
     { id: 'library', label: t('social.tab.library') },
     { id: 'queue', label: t('social.tab.queue') },
+    { id: 'posters', label: t('social.tab.posters') },
   ];
 
   return (
@@ -402,6 +414,16 @@ export function CompanySocialPage() {
         />
       ) : null}
 
+      {tab === 'posters' && base ? (
+        <PostersTab
+          base={base}
+          t={t}
+          canCreate={overview.canCreate}
+          canApprove={overview.canApprove}
+          onNotice={setNotice}
+        />
+      ) : null}
+
       {tab === 'queue' ? (
         <QueueTab
           jobs={jobs}
@@ -440,13 +462,37 @@ export function CompanySocialPage() {
           detail ? (
             <div className="row-actions">
               {detail.status === 'awaiting_approval' && overview.canApprove ? (
-                <Button
-                  onClick={async () => {
-                    await postAction(detail, 'approve');
-                  }}
-                >
-                  {t('social.approve')}
-                </Button>
+                <>
+                  <Button
+                    onClick={async () => {
+                      await postAction(detail, 'approve');
+                    }}
+                  >
+                    {t('social.approve')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    loading={busy === `${detail.id}:request-changes`}
+                    onClick={async () => {
+                      const reason = window.prompt(t('social.reasonPrompt'));
+                      if (!reason) return;
+                      await postAction(detail, 'request-changes', { reason });
+                    }}
+                  >
+                    {t('social.requestChanges')}
+                  </Button>
+                  <Button
+                    variant="danger"
+                    loading={busy === `${detail.id}:reject`}
+                    onClick={async () => {
+                      const reason = window.prompt(t('social.reasonPrompt'));
+                      if (!reason) return;
+                      await postAction(detail, 'reject', { reason });
+                    }}
+                  >
+                    {t('social.reject')}
+                  </Button>
+                </>
               ) : null}
               {detail.approvedAt ? (
                 <Button
@@ -466,7 +512,25 @@ export function CompanySocialPage() {
           ) : undefined
         }
       >
-        {detail ? <PostDetail post={detail} locale={locale} t={t} platforms={platforms} /> : null}
+        {detail ? (
+          <>
+            <PostDetail post={detail} locale={locale} t={t} platforms={platforms} />
+            {detail.version > 1 && base ? (
+              <VersionHistory
+                base={base}
+                post={detail}
+                locale={locale}
+                t={t}
+                canCreate={overview.canCreate}
+                onRestored={async () => {
+                  setDetail(null);
+                  setNotice({ tone: 'ok', text: t('social.restored') });
+                  await load();
+                }}
+              />
+            ) : null}
+          </>
+        ) : null}
       </Modal>
 
       <Modal
@@ -548,6 +612,14 @@ function AccountsTab({
     ['ads', 'social.cap.ads'],
   ];
 
+  // Phase 0: Google Analytics, Search Console and Tag Manager are not part of
+  // the product surface. Their tables and connections are kept, but they are
+  // not offered here as features.
+  const visiblePlatforms = overview.platforms.filter((platform) => platform.category === 'social');
+  const hiddenGoogle = overview.platforms.filter((platform) =>
+    ['ga4', 'search_console', 'google_tag_manager'].includes(platform.key)
+  );
+
   const setupRow = (label: string, ready: boolean, requires: string[]) => (
     <li key={label} className="social-setup-row">
       <span>{label}</span>
@@ -570,38 +642,63 @@ function AccountsTab({
           {setupRow(t('social.setupMeta'), overview.setup.meta.configured, overview.setup.meta.requires)}
           {setupRow(t('social.setupGoogle'), overview.setup.google.configured, overview.setup.google.requires)}
           {setupRow(t('social.setupEmail'), overview.setup.email.configured, overview.setup.email.requires)}
-          {setupRow(t('social.setupScheduler'), overview.setup.scheduler === 'configured', ['JOBS_SECRET'])}
+          {setupRow(t('social.setupScheduler'), overview.setup.scheduler.state === 'configured', [
+            'JOBS_SECRET',
+          ])}
         </ul>
-        {overview.setup.scheduler !== 'configured' ? (
+        {overview.setup.scheduler.state !== 'configured' ? (
           <Alert tone="warn">{t('social.setupSchedulerOff')}</Alert>
+        ) : (
+          <p className="muted small">{t('social.schedulerManualOnly')}</p>
+        )}
+        {!overview.subscription.isActive ? (
+          <Alert tone="danger">{t('social.subscriptionBlocked')}</Alert>
         ) : null}
       </Card>
 
-      {overview.platforms.map((platform) => (
+      {hiddenGoogle.length ? (
+        <Card title={t('social.googleHiddenTitle')}>
+          <p className="muted small">{t('social.googleHiddenNote')}</p>
+          <ul className="social-setup">
+            {hiddenGoogle.map((platform) => (
+              <li key={platform.key} className="social-setup-row">
+                <span>{platform.name[locale]}</span>
+                <span className="badge badge-muted">{t(`social.state.${platform.state}`, platform.state)}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      {visiblePlatforms.map((platform) => (
         <Card
           key={platform.key}
           title={
             <span className="social-platform-head">
               {platform.name[locale]}
-              <span className={cx('badge', `badge-${availabilityTone(platform.availability)}`)}>
-                {t(`social.state.${platform.availability}`)}
+              <span className={cx('badge', `badge-${stateTone(platform.state)}`)}>
+                {t(`social.state.${platform.state}`, platform.state)}
               </span>
-              {platform.reviewPending && platform.availability === 'available' ? (
-                <span className="badge badge-warn">{t('social.reviewPendingBadge')}</span>
+              {platform.availability === 'requires_credentials' ? (
+                <span className="badge badge-warn">{t('social.state.requires_credentials')}</span>
               ) : null}
             </span>
           }
           subtitle={platform.accountRequirement[locale]}
         >
           <div className="social-capabilities">
-            {capabilityRows.map(([key, label]) => (
-              <span
-                key={key}
-                className={cx('social-cap', platform.capabilities[key] ? 'is-yes' : 'is-no')}
-              >
-                {t(label)}: {platform.capabilities[key] ? t('social.cap.yes') : t('social.cap.no')}
-              </span>
-            ))}
+            {capabilityRows.map(([key, label]) => {
+              const state = platform.capabilityStates?.[key] ?? 'not_supported';
+              return (
+                <span
+                  key={key}
+                  className={cx('social-cap', state === 'working_test' ? 'is-yes' : 'is-no')}
+                  title={t(`social.state.${state}`, state)}
+                >
+                  {t(label)}: {t(`social.state.${state}`, state)}
+                </span>
+              );
+            })}
           </div>
 
           {platform.access.reviewRequired ? (
@@ -716,8 +813,16 @@ function AccountsTab({
   );
 }
 
-const availabilityTone = (state: string) =>
-  state === 'available' ? 'ok' : state === 'pending_review' ? 'warn' : state === 'not_supported' ? 'muted' : 'warn';
+/** Tones for the states this build may claim. `live_verified` is never set
+ * by the build itself; it exists so a verified run has a label. */
+const stateTone = (state: string) =>
+  state === 'working_test' || state === 'live_verified'
+    ? 'ok'
+    : state === 'requires_credentials' || state === 'requires_app_review'
+      ? 'warn'
+      : state === 'not_implemented' || state === 'blocked_by_hosting'
+        ? 'info'
+        : 'muted';
 
 const tokenTone = (state: string) =>
   state === 'connected' ? 'ok' : state === 'expiring' ? 'warn' : 'danger';
@@ -888,6 +993,18 @@ function PostDetail({
           </span>
         ) : null}
       </div>
+
+      {post.reviewNote ? (
+        <Alert tone={post.status === 'rejected' ? 'danger' : 'warn'}>
+          <strong>
+            {post.status === 'rejected' ? t('social.reject') : t('social.requestChanges')}:{' '}
+          </strong>
+          {post.reviewNote}
+          {post.reviewedAt ? (
+            <span className="muted small"> · {formatDateTime(post.reviewedAt, locale)}</span>
+          ) : null}
+        </Alert>
+      ) : null}
 
       <div className="social-post-body">
         {post.bodyAr ? <p dir="rtl">{post.bodyAr}</p> : null}
@@ -1264,7 +1381,7 @@ function QueueTab({
   events: EventRow[];
   locale: 'ar' | 'en';
   t: (key: string, fallback?: string) => string;
-  scheduler: 'configured' | 'not_configured';
+  scheduler: { state: string; execution: string; automatic: boolean };
   busy: string | null;
   onRun: () => void;
 }) {
@@ -1279,7 +1396,11 @@ function QueueTab({
           </Button>
         }
       >
-        {scheduler !== 'configured' ? <Alert tone="warn">{t('social.schedulerOff')}</Alert> : null}
+        {scheduler.state !== 'configured' ? (
+          <Alert tone="warn">{t('social.schedulerOff')}</Alert>
+        ) : (
+          <Alert tone="info">{t('social.schedulerManualOnly')}</Alert>
+        )}
         {jobs.length === 0 ? (
           <EmptyState>{t('social.queueEmpty')}</EmptyState>
         ) : (
@@ -1329,5 +1450,301 @@ function QueueTab({
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * Posters are rendered by the Worker as SVG from the client's own words and
+ * brand colour. Nothing enters publishing before approval: a draft has no
+ * public image URL.
+ */
+function PostersTab({
+  base,
+  t,
+  canCreate,
+  canApprove,
+  onNotice,
+}: {
+  base: string;
+  t: (key: string, fallback?: string) => string;
+  canCreate: boolean;
+  canApprove: boolean;
+  onNotice: (notice: { tone: 'ok' | 'warn' | 'danger' | 'info'; text: string } | null) => void;
+}) {
+  const [data, setData] = useState<any>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    headline: '',
+    subhead: '',
+    cta: '',
+    sizeKey: 'instagram_business',
+    template: 'bold',
+    brandColor: '#0f766e',
+    language: 'ar',
+  });
+
+  const load = useCallback(async () => {
+    try {
+      setData(await api<any>(`${base}/posters`));
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    }
+  }, [base, t, onNotice]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const create = async () => {
+    setBusy('create');
+    try {
+      await api(`${base}/posters`, { method: 'POST', body: form });
+      setOpen(false);
+      setForm({ ...form, headline: '', subhead: '', cta: '' });
+      onNotice({ tone: 'ok', text: t('social.posterCreated') });
+      await load();
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const act = async (poster: any, action: 'approve' | 'archive') => {
+    setBusy(poster.id);
+    try {
+      await api(`${base}/posters/${poster.id}/${action}`, { method: 'POST', body: {} });
+      await load();
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const posters: any[] = data?.posters ?? [];
+
+  return (
+    <div className="social-stack">
+      <Card
+        title={t('social.postersTitle')}
+        subtitle={t('social.postersHint')}
+        actions={
+          canCreate ? (
+            <Button size="sm" onClick={() => setOpen(true)}>
+              {t('social.newPoster')}
+            </Button>
+          ) : undefined
+        }
+      >
+        {posters.length === 0 ? (
+          <EmptyState>{t('social.noPosters')}</EmptyState>
+        ) : (
+          <div className="poster-grid">
+            {posters.map((poster) => (
+              <figure key={poster.id} className="poster-card">
+                <img
+                  src={`${base}/posters/${poster.id}/preview.svg`}
+                  alt={poster.headline}
+                  loading="lazy"
+                />
+                <figcaption>
+                  <strong>{poster.headline}</strong>
+                  <span className="muted small" dir="ltr">
+                    {poster.sizeKey} · {poster.width}×{poster.height} · v{poster.version}
+                  </span>
+                  <StatusBadge
+                    status={poster.status === 'approved' ? 'approved' : 'draft'}
+                    label={t(`social.poster.${poster.status}`)}
+                  />
+                  <div className="row-actions">
+                    {canApprove && poster.status === 'draft' ? (
+                      <Button
+                        size="sm"
+                        loading={busy === poster.id}
+                        onClick={() => void act(poster, 'approve')}
+                      >
+                        {t('social.approve')}
+                      </Button>
+                    ) : null}
+                    {canApprove && poster.status !== 'archived' ? (
+                      <Button size="sm" variant="ghost" onClick={() => void act(poster, 'archive')}>
+                        {t('social.archive')}
+                      </Button>
+                    ) : null}
+                  </div>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Modal
+        open={open}
+        title={t('social.newPoster')}
+        onClose={() => setOpen(false)}
+        footer={
+          <div className="row-actions">
+            <Button loading={busy === 'create'} onClick={() => void create()}>
+              {t('common.create')}
+            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+        }
+      >
+        <div className="form-grid">
+          <Field label={t('social.posterHeadline')}>
+            <Input
+              value={form.headline}
+              onChange={(event) => setForm({ ...form, headline: event.target.value })}
+              maxLength={240}
+            />
+          </Field>
+          <Field label={t('social.posterSubhead')}>
+            <Input
+              value={form.subhead}
+              onChange={(event) => setForm({ ...form, subhead: event.target.value })}
+              maxLength={400}
+            />
+          </Field>
+          <Field label={t('social.posterCta')}>
+            <Input
+              value={form.cta}
+              onChange={(event) => setForm({ ...form, cta: event.target.value })}
+              maxLength={60}
+            />
+          </Field>
+          <Field label={t('social.posterSize')}>
+            <Select
+              value={form.sizeKey}
+              onChange={(event) => setForm({ ...form, sizeKey: event.target.value })}
+            >
+              {(data?.sizes ?? []).map((size: any) => (
+                <option key={size.key} value={size.key}>
+                  {size.key} · {size.width}×{size.height}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={t('social.posterTemplate')}>
+            <Select
+              value={form.template}
+              onChange={(event) => setForm({ ...form, template: event.target.value })}
+            >
+              {(data?.templates ?? ['bold']).map((template: string) => (
+                <option key={template} value={template}>
+                  {template}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={t('social.posterColor')}>
+            <Input
+              dir="ltr"
+              value={form.brandColor}
+              onChange={(event) => setForm({ ...form, brandColor: event.target.value })}
+            />
+          </Field>
+          <Field label={t('social.posterLanguage')}>
+            <Select
+              value={form.language}
+              onChange={(event) => setForm({ ...form, language: event.target.value })}
+            >
+              <option value="ar">العربية</option>
+              <option value="en">English</option>
+            </Select>
+          </Field>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/**
+ * Every edit stores a snapshot. Restoring does not rewrite the current post:
+ * the API creates a new draft from the old snapshot, so nothing is lost.
+ */
+function VersionHistory({
+  base,
+  post,
+  locale,
+  t,
+  canCreate,
+  onRestored,
+}: {
+  base: string;
+  post: PostRow;
+  locale: 'ar' | 'en';
+  t: (key: string, fallback?: string) => string;
+  canCreate: boolean;
+  onRestored: () => Promise<void>;
+}) {
+  const [items, setItems] = useState<Array<any>>([]);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void Promise.all(
+      Array.from({ length: post.version }, (_, index) =>
+        api<any>(`${base}/posts/${post.id}/versions/${index + 1}`).catch(() => null)
+      )
+    ).then((rows) => {
+      if (live) setItems(rows.filter(Boolean).reverse());
+    });
+    return () => {
+      live = false;
+    };
+  }, [base, post.id, post.version]);
+
+  const restore = async (version: number) => {
+    setBusy(version);
+    setError(null);
+    try {
+      await api(`${base}/posts/${post.id}/versions/${version}/restore`, {
+        method: 'POST',
+        body: {},
+      });
+      await onRestored();
+    } catch (failure) {
+      setError(t(errorKey((failure as ApiError)?.code)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card title={t('social.versions')} subtitle={t('social.versionsHint')}>
+      {error ? <Alert tone="danger">{error}</Alert> : null}
+      <Table head={[t('social.version'), t('social.versionChange'), t('social.createdAt'), t('common.actions')]}>
+        {items.map((item) => (
+          <tr key={item.version}>
+            <td>v{item.version}</td>
+            <td className="muted small" dir="auto">
+              {(item.snapshot?.bodyAr || item.snapshot?.bodyEn || '').slice(0, 80)}
+            </td>
+            <td>{formatDateTime(item.createdAt, locale)}</td>
+            <td>
+              {canCreate && item.version !== post.version ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={busy === item.version}
+                  onClick={() => void restore(item.version)}
+                >
+                  {t('social.restore')}
+                </Button>
+              ) : (
+                <span className="muted small">{t('social.currentVersion')}</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </Table>
+    </Card>
   );
 }

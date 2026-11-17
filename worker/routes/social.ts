@@ -12,11 +12,13 @@
  * recorded exactly as it went out.
  */
 import { Hono } from 'hono';
+import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../lib/auth';
 import { companyContext, requireAuth } from '../lib/auth';
 import {
   all,
   audit,
+  computeSubscription,
   first,
   getSettings,
   newId,
@@ -30,10 +32,12 @@ import { tokenKeyConfigured } from '../lib/crypto';
 import { apiError } from './public';
 import {
   availabilityOf,
+  capabilityStatesOf,
   connectorConfig,
   isPlatform,
   PLATFORM_ORDER,
   PLATFORMS,
+  platformStateOf,
   publishesAnything,
   tokenStatusOf,
   type PlatformKey,
@@ -62,6 +66,53 @@ const app = new Hono<AppEnv>();
 app.use('*', requireAuth);
 app.use('/:companyId', companyContext);
 app.use('/:companyId/*', companyContext);
+
+/**
+ * Every social route needs a subscription that is active today. The check is
+ * computed from the company row (so an expired end date counts even when the
+ * stored status is still "active") and returns a stable 402 so the client can
+ * link to billing. Platform administrators keep their own console under
+ * /api/admin; this guard only covers a tenant's social workspace.
+ */
+const socialSubscription: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (c.get('user')?.platformRole === 'super_admin') return next();
+  const company = c.get('company');
+  if (!company) return c.json({ error: { code: 'company_not_found' } }, 404);
+  const settings = await getSettings(c.env);
+  const subscription = computeSubscription(
+    company,
+    Number(settings['subscription.warning_days'] ?? '30') || 30
+  );
+  if (!subscription.isActive) {
+    return c.json(
+      {
+        error: {
+          code: 'subscription_inactive',
+          status: subscription.effectiveStatus,
+          daysLeft: subscription.daysLeft,
+        },
+      },
+      402
+    );
+  }
+  await next();
+};
+
+app.use('/:companyId/social', socialSubscription);
+app.use('/:companyId/social/*', socialSubscription);
+
+/**
+ * The redirect URI every provider should be configured with.
+ *
+ * Defaults to the deployment's own origin so a preview and production can
+ * coexist, and accepts an explicit override for custom domains or a locked
+ * canonical host.
+ */
+export function oauthRedirectUri(c: any) {
+  const configured = str((c.env as any).SOCIAL_OAUTH_REDIRECT_URI, 500);
+  if (configured) return configured;
+  return `${new URL(c.req.url).origin}/api/social/oauth/callback`;
+}
 
 const MANAGE = 'social.manage';
 const APPROVE = 'content.approve';
@@ -160,6 +211,9 @@ const serializePost = (post: any, targets: any[]) => ({
   submittedAt: post.submitted_at,
   approvedBy: post.approved_by,
   approvedAt: post.approved_at,
+  reviewNote: post.review_note ?? null,
+  reviewedBy: post.reviewed_by ?? null,
+  reviewedAt: post.reviewed_at ?? null,
   publishedAt: post.published_at,
   createdAt: post.created_at,
   updatedAt: post.updated_at,
@@ -338,6 +392,10 @@ app.get('/:companyId/social', async (c) => {
   const rows = await companyConnections(c.env, company.id);
   const connections = rows.map(serializeConnection);
   const config = connectorConfig(c.env);
+  const subscription = computeSubscription(
+    company,
+    Number(settings['subscription.warning_days'] ?? '30') || 30
+  );
 
   const platforms = PLATFORM_ORDER.map((key) => {
     const spec = PLATFORMS[key];
@@ -353,6 +411,10 @@ app.get('/:companyId/social', async (c) => {
       limits: spec.limits,
       publishable: publishesAnything(key),
       oauthImplemented: isOauthPlatform(key),
+      // `state` is what the channel can actually do in this build;
+      // `availability` only says whether an authorization can be started.
+      state: platformStateOf(key, c.env as any, settings),
+      capabilityStates: capabilityStatesOf(key),
       availability: availability.state,
       availabilityReasons: availability.reasons,
       accessApproved: availability.accessApproved,
@@ -389,8 +451,22 @@ app.get('/:companyId/social', async (c) => {
       meta: { configured: config.meta.configured, requires: config.meta.requires },
       google: { configured: config.google.configured, requires: config.google.requires },
       email: { configured: config.email.configured, requires: config.email.requires },
-      scheduler:
-        Boolean((c.env as any).JOBS_SECRET) ? 'configured' : 'not_configured',
+      scheduler: {
+        state: Boolean((c.env as any).JOBS_SECRET) ? 'configured' : 'blocked_by_hosting',
+        // This hosting target has no cron trigger, so a due job is only run by
+        // an external caller with the secret or by a company admin on demand.
+        execution: 'manual_or_external',
+        automatic: false,
+      },
+    },
+    analytics: {
+      state: 'not_implemented',
+      note: 'Reading GA4 reports, Search Console queries, Meta/Instagram insights or Business Profile metrics is not implemented. Only manual campaign results are available.',
+    },
+    subscription: {
+      status: subscription.effectiveStatus,
+      isActive: subscription.isActive,
+      daysLeft: subscription.daysLeft,
     },
     stats: {
       connections: connections.length,
@@ -437,9 +513,11 @@ app.post('/:companyId/social/oauth/start', async (c) => {
     return apiError(c, 409, 'oauth_not_supported');
   }
 
-  const redirectUri =
-    str((c.env as any).META_REDIRECT_URI, 400) ||
-    `${new URL(c.req.url).origin}/api/company/${company.id}/social/oauth/callback`;
+  // One redirect URI for the whole platform. Providers match the redirect URI
+  // byte for byte, so a per-company path would force the operator to register
+  // a URI for every customer they onboard. The tenant is carried by the signed
+  // `state` row instead (see socialCallbackRoutes below).
+  const redirectUri = oauthRedirectUri(c);
 
   try {
     const started = await startFlow(c.env, {
@@ -485,6 +563,82 @@ app.get('/:companyId/social/oauth/callback', async (c) => {
     return c.redirect(`${appBase}?oauth=${encodeURIComponent(reason)}`);
   }
   if (row.company_id !== company.id) return c.redirect(`${appBase}?oauth=tenant_mismatch`);
+  if (!code) return c.redirect(`${appBase}?oauth=code_missing`);
+
+  try {
+    await finishFlow(c.env, row, code);
+    await logEvent(c.env, {
+      companyId: company.id,
+      kind: 'oauth.authorized',
+      detail: String(row.platform),
+      actorUserId: actor.id,
+    });
+    return c.redirect(`${appBase}?oauth=select&state=${encodeURIComponent(state)}`);
+  } catch (error) {
+    const message = String((error as Error)?.message ?? 'oauth_failed');
+    await logEvent(c.env, {
+      companyId: company.id,
+      kind: 'oauth.failed',
+      detail: `${row.platform}: ${message}`.slice(0, 400),
+      actorUserId: actor.id,
+    });
+    const reason = message.split(':')[0].replace(/_failed$/, '');
+    return c.redirect(`${appBase}?oauth=${encodeURIComponent(reason)}`);
+  }
+});
+
+/**
+ * Provider redirect target shared by every tenant: `/api/social/oauth/callback`.
+ *
+ * The provider only ever sees this one URL. The tenant is read from the `state`
+ * row, which was written for the signed-in user when the flow started, and the
+ * caller is checked against the membership of that company before any token is
+ * exchanged. A state that belongs to another user or company is refused, so a
+ * single shared endpoint does not weaken tenant isolation.
+ */
+export const socialCallbackRoutes = new Hono<AppEnv>();
+socialCallbackRoutes.use('*', requireAuth);
+
+socialCallbackRoutes.get('/social/oauth/callback', async (c) => {
+  const actor = c.get('user');
+  const state = str(c.req.query('state'), 100);
+  const code = str(c.req.query('code'), 2000);
+  const denied = str(c.req.query('error'), 100);
+
+  if (!state) return c.redirect('/app?oauth=invalid');
+  if (denied) return c.redirect('/app?oauth=denied');
+
+  let row: any;
+  try {
+    row = await consumeState(c.env, state, actor.id);
+  } catch (error) {
+    const reason = String((error as Error)?.message ?? 'oauth_state_invalid').replace(
+      'oauth_state_',
+      ''
+    );
+    return c.redirect(`/app?oauth=${encodeURIComponent(reason)}`);
+  }
+
+  const appBase = `/app/${row.company_id}/social`;
+  const company = await first<any>(c.env, 'SELECT * FROM companies WHERE id = ?', row.company_id);
+  const membership = await first<any>(
+    c.env,
+    'SELECT id, status FROM memberships WHERE user_id = ? AND company_id = ?',
+    actor.id,
+    row.company_id
+  );
+  if (!company || !membership || membership.status !== 'active') {
+    return c.redirect('/app?oauth=tenant_mismatch');
+  }
+
+  const settings = await getSettings(c.env);
+  const subscription = computeSubscription(
+    company,
+    Number(settings['subscription.warning_days'] ?? '30') || 30
+  );
+  if (!subscription.isActive && actor.platformRole !== 'super_admin') {
+    return c.redirect(`${appBase}?oauth=subscription_inactive`);
+  }
   if (!code) return c.redirect(`${appBase}?oauth=code_missing`);
 
   try {
@@ -910,7 +1064,8 @@ app.put('/:companyId/social/posts/:postId', async (c) => {
     c.env,
     `UPDATE social_posts SET title = ?, body_ar = ?, body_en = ?, link_url = ?, cta_label = ?, hashtags = ?,
        media_json = ?, language = ?, scheduled_at = ?, version = ?, status = 'draft', submitted_by = NULL,
-       submitted_at = NULL, approved_by = NULL, approved_at = NULL, updated_at = ?
+       submitted_at = NULL, approved_by = NULL, approved_at = NULL, review_note = NULL,
+       reviewed_by = NULL, reviewed_at = NULL, updated_at = ?
      WHERE id = ? AND company_id = ?`,
     input.title || null,
     input.bodyAr || null,
@@ -1022,7 +1177,11 @@ app.post('/:companyId/social/posts/:postId/submit', async (c) => {
   if (!can(c.get('role'), CREATE)) return apiError(c, 403, 'forbidden');
   const loaded = await loadPost(c.env, company.id, c.req.param('postId'));
   if (!loaded) return apiError(c, 404, 'post_not_found');
-  if (!['draft', 'awaiting_approval', 'approved'].includes(loaded.post.status)) {
+  if (
+    !['draft', 'changes_requested', 'rejected', 'awaiting_approval', 'approved'].includes(
+      loaded.post.status
+    )
+  ) {
     return apiError(c, 409, 'post_state_invalid');
   }
   if (!loaded.targets.length) return apiError(c, 422, 'targets_required');
@@ -1082,7 +1241,8 @@ app.post('/:companyId/social/posts/:postId/approve', async (c) => {
   const timestamp = nowIso();
   await run(
     c.env,
-    `UPDATE social_posts SET status = ?, approved_by = ?, approved_at = ?, updated_at = ?
+    `UPDATE social_posts SET status = ?, approved_by = ?, approved_at = ?, review_note = NULL,
+       reviewed_by = NULL, reviewed_at = NULL, updated_at = ?
      WHERE id = ? AND company_id = ?`,
     loaded.post.scheduled_at ? 'scheduled' : 'approved',
     actor.id,
@@ -1127,6 +1287,209 @@ app.post('/:companyId/social/posts/:postId/approve', async (c) => {
 
   const result = await loadPost(c.env, company.id, loaded.post.id);
   return c.json({ post: serializePost(result!.post, result!.targets) });
+});
+
+
+// ---------------------------------------------------------------------------
+// Review decisions: reject or send back for changes, with a stored reason
+// ---------------------------------------------------------------------------
+
+async function reviewDecision(c: any, decision: 'rejected' | 'changes_requested') {
+  const company = c.get('company');
+  const actor = c.get('user');
+  if (!can(c.get('role'), APPROVE)) return apiError(c, 403, 'forbidden');
+
+  const loaded = await loadPost(c.env, company.id, c.req.param('postId'));
+  if (!loaded) return apiError(c, 404, 'post_not_found');
+  if (loaded.post.status === 'published' || loaded.post.status === 'partially_published') {
+    return apiError(c, 409, 'post_already_published');
+  }
+  if (loaded.post.status !== 'awaiting_approval') {
+    return apiError(c, 409, 'post_state_invalid');
+  }
+
+  const body = await readJson<{ reason?: string }>(c);
+  const reason = str(body.reason, 500);
+  if (reason.length < 3) return apiError(c, 422, 'review_reason_required');
+
+  const timestamp = nowIso();
+  await run(
+    c.env,
+    `UPDATE social_posts SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ?,
+       approved_by = NULL, approved_at = NULL, scheduled_at = NULL, updated_at = ?
+     WHERE id = ? AND company_id = ?`,
+    decision,
+    reason,
+    actor.id,
+    timestamp,
+    timestamp,
+    loaded.post.id,
+    company.id
+  );
+  // A decision can only happen before approval, but cancelling any queued job
+  // here keeps the queue consistent if a state was forced.
+  await run(
+    c.env,
+    `UPDATE social_jobs SET state = 'cancelled', updated_at = ?
+      WHERE company_id = ? AND target_id IN (SELECT id FROM social_post_targets WHERE post_id = ?)`,
+    timestamp,
+    company.id,
+    loaded.post.id
+  );
+  await logEvent(c.env, {
+    companyId: company.id,
+    postId: loaded.post.id,
+    kind: decision === 'rejected' ? 'post.rejected' : 'post.changes_requested',
+    detail: reason,
+    actorUserId: actor.id,
+  });
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    companyId: company.id,
+    action: decision === 'rejected' ? 'social.post_rejected' : 'social.post_changes_requested',
+    entityType: 'social_post',
+    entityId: loaded.post.id,
+    meta: { reason, version: loaded.post.version },
+  });
+
+  const result = await loadPost(c.env, company.id, loaded.post.id);
+  return c.json({ post: serializePost(result!.post, result!.targets) });
+}
+
+app.post('/:companyId/social/posts/:postId/reject', (c) => reviewDecision(c, 'rejected'));
+app.post('/:companyId/social/posts/:postId/request-changes', (c) =>
+  reviewDecision(c, 'changes_requested')
+);
+
+/**
+ * Restoring does not overwrite history: it creates a new draft from the
+ * snapshot and leaves the original post (and the version list) untouched.
+ */
+app.post('/:companyId/social/posts/:postId/versions/:version/restore', async (c) => {
+  const company = c.get('company');
+  const actor = c.get('user');
+  if (!can(c.get('role'), CREATE)) return apiError(c, 403, 'forbidden');
+
+  const original = await loadPost(c.env, company.id, c.req.param('postId'));
+  if (!original) return apiError(c, 404, 'post_not_found');
+  const versionNumber = Number(c.req.param('version'));
+  if (!Number.isInteger(versionNumber) || versionNumber < 1) {
+    return apiError(c, 422, 'version_invalid');
+  }
+  const snapshotRow = await first<any>(
+    c.env,
+    'SELECT * FROM social_post_versions WHERE post_id = ? AND company_id = ? AND version = ?',
+    original.post.id,
+    company.id,
+    versionNumber
+  );
+  if (!snapshotRow) return apiError(c, 404, 'version_not_found');
+
+  const snapshot = parseJson<any>(snapshotRow.snapshot_json, {});
+  const input: PostInput = {
+    title: str(snapshot.title, 200),
+    bodyAr: str(snapshot.bodyAr, 8000),
+    bodyEn: str(snapshot.bodyEn, 8000),
+    linkUrl: str(snapshot.linkUrl, 800),
+    ctaLabel: str(snapshot.ctaLabel, 60),
+    hashtags: str(snapshot.hashtags, 600),
+    language:
+      snapshot.language === 'en' || snapshot.language === 'both' || snapshot.language === 'ar'
+        ? snapshot.language
+        : 'ar',
+    media: Array.isArray(snapshot.media) ? snapshot.media : [],
+  };
+
+  const selection: Array<{ platform: PlatformKey; connectionId: string }> = [];
+  for (const target of original.targets) {
+    if (!target.connection_id) continue;
+    if (!isPlatform(target.platform) || !publishesAnything(target.platform)) continue;
+    const connection = await first<any>(
+      c.env,
+      'SELECT id FROM social_connections WHERE id = ? AND company_id = ?',
+      target.connection_id,
+      company.id
+    );
+    if (connection) selection.push({ platform: target.platform, connectionId: target.connection_id });
+  }
+  if (!selection.length) return apiError(c, 422, 'restore_requires_connection');
+
+  const timestamp = nowIso();
+  const id = newId('post');
+  await run(
+    c.env,
+    `INSERT INTO social_posts (id, company_id, title, body_ar, body_en, link_url, cta_label, hashtags,
+       media_json, language, status, version, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?)`,
+    id,
+    company.id,
+    input.title || null,
+    input.bodyAr || null,
+    input.bodyEn || null,
+    input.linkUrl || null,
+    input.ctaLabel || null,
+    input.hashtags || null,
+    JSON.stringify(input.media),
+    input.language,
+    actor.id,
+    timestamp,
+    timestamp
+  );
+  try {
+    await syncTargets(c.env, company.id, id, input, selection);
+  } catch (error) {
+    await run(c.env, 'DELETE FROM social_posts WHERE id = ? AND company_id = ?', id, company.id);
+    return apiError(c, 422, 'restore_targets_failed');
+  }
+  const created = await first<any>(c.env, 'SELECT * FROM social_posts WHERE id = ?', id);
+  await saveVersion(c.env, created, actor.id, `restored_from_v${versionNumber}`, 1);
+  await logEvent(c.env, {
+    companyId: company.id,
+    postId: id,
+    kind: 'post.restored',
+    detail: `from ${original.post.id} v${versionNumber}`,
+    actorUserId: actor.id,
+  });
+  await audit(c.env, {
+    actorUserId: actor.id,
+    actorEmail: actor.email,
+    companyId: company.id,
+    action: 'social.post_restored',
+    entityType: 'social_post',
+    entityId: id,
+    meta: { from: original.post.id, version: versionNumber },
+  });
+
+  const result = await loadPost(c.env, company.id, id);
+  return c.json({ post: serializePost(result!.post, result!.targets) }, 201);
+});
+
+/**
+ * Version snapshots are read here, not inside the post payload, so listing a
+ * library page never ships the full history body.
+ */
+app.get('/:companyId/social/posts/:postId/versions/:version', async (c) => {
+  const company = c.get('company');
+  if (!can(c.get('role'), CREATE) && !can(c.get('role'), 'reports.view')) {
+    return apiError(c, 403, 'forbidden');
+  }
+  const versionNumber = Number(c.req.param('version'));
+  const row = await first<any>(
+    c.env,
+    'SELECT * FROM social_post_versions WHERE post_id = ? AND company_id = ? AND version = ?',
+    c.req.param('postId'),
+    company.id,
+    versionNumber
+  );
+  if (!row) return apiError(c, 404, 'version_not_found');
+  return c.json({
+    version: row.version,
+    reason: row.reason,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    snapshot: parseJson<any>(row.snapshot_json, {}),
+  });
 });
 
 app.post('/:companyId/social/posts/:postId/schedule', async (c) => {
@@ -1278,7 +1641,11 @@ app.get('/:companyId/social/jobs', async (c) => {
     company.id
   );
   return c.json({
-    scheduler: Boolean((c.env as any).JOBS_SECRET) ? 'configured' : 'not_configured',
+    scheduler: {
+      state: Boolean((c.env as any).JOBS_SECRET) ? 'configured' : 'blocked_by_hosting',
+      execution: 'manual_or_external',
+      automatic: false,
+    },
     jobs: rows.map((row) => ({
       id: row.id,
       platform: row.platform,

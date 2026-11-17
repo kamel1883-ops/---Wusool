@@ -4,7 +4,11 @@ import publicRoutes from './routes/public';
 import companyRoutes from './routes/company';
 import analysisRoutes from './routes/analysis';
 import growthRoutes from './routes/growth';
-import socialRoutes from './routes/social';
+import socialRoutes, { socialCallbackRoutes } from './routes/social';
+import dashboardRoutes from './routes/dashboard';
+import posterRoutes, { posterPublicRoutes } from './routes/posters';
+import trackingRoutes, { beaconRoutes, redirectRoutes } from './routes/tracking';
+import ownerResetRoutes from './routes/owner-reset';
 import { runDueJobs } from './lib/social/publish';
 import adminRoutes from './routes/admin';
 import purchaseAdminRoutes from './routes/purchase-admin';
@@ -12,6 +16,14 @@ import purchaseAdminRoutes from './routes/purchase-admin';
 const app = new Hono<AppEnv>();
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Public measurement endpoint. It is called by a landing-page beacon, not by
+ * the signed-in client, so it cannot carry our CSRF header. It has no session
+ * to hijack: the only input is a link code, and the handler caps events per
+ * visitor and refuses fictional kinds.
+ */
+const CSRF_EXEMPT = new Set(['/api/tracking/events']);
 
 /**
  * Scheduler entry point for due publishing jobs.
@@ -45,7 +57,7 @@ app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
 
-  if (MUTATING.has(c.req.method)) {
+  if (MUTATING.has(c.req.method) && !CSRF_EXEMPT.has(c.req.path)) {
     // Defence in depth on top of the SameSite=Lax session cookie: every
     // mutation must come from our own client and from the same origin.
     if (c.req.header('x-wusool-client') !== 'web') {
@@ -66,11 +78,20 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
+app.route('/', redirectRoutes);
+app.route('/', ownerResetRoutes);
+app.route('/api', beaconRoutes);
+app.route('/api', posterPublicRoutes);
 app.route('/api', publicRoutes);
 app.route('/api/company', companyRoutes);
 app.route('/api/company', analysisRoutes);
 app.route('/api/company', growthRoutes);
 app.route('/api/company', socialRoutes);
+// Shared OAuth landing page: one redirect URI registered once per provider.
+app.route('/api', socialCallbackRoutes);
+app.route('/api/company', trackingRoutes);
+app.route('/api/company', dashboardRoutes);
+app.route('/api/company', posterRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin', purchaseAdminRoutes);
 

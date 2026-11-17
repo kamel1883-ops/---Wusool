@@ -205,7 +205,7 @@ const JOURNEY_STAGES: Array<{ n: number; icon: GlyphName; status: StageStatus; a
   { n: 3, icon: 'strategy', status: 'partial', anchor: '#analysis' },
   { n: 4, icon: 'audience', status: 'live', anchor: '#leads' },
   { n: 5, icon: 'campaign', status: 'partial', anchor: '#leads' },
-  { n: 6, icon: 'design', status: 'planned', anchor: '#content' },
+  { n: 6, icon: 'design', status: 'live', anchor: '#content' },
   { n: 7, icon: 'check', status: 'live', anchor: '#approval' },
   { n: 8, icon: 'follow', status: 'partial', anchor: '#leads' },
   { n: 9, icon: 'chart', status: 'partial', anchor: '#reports' },
@@ -574,6 +574,27 @@ function JourneyMap() {
               {t('lp.journey.more')}
               <span aria-hidden> ←</span>
             </a>
+            <div className="lp-journey-nav">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setActive(active === 1 ? JOURNEY_STAGES.length : active - 1)}
+              >
+                {t('lp.journey.prev')}
+              </button>
+              <span className="lp-journey-step">
+                {t('lp.journey.step')
+                  .replace('{n}', String(active))
+                  .replace('{total}', String(JOURNEY_STAGES.length))}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setActive(active === JOURNEY_STAGES.length ? 1 : active + 1)}
+              >
+                {t('lp.journey.next')}
+              </button>
+            </div>
           </div>
         </div>
         <p className="lp-note">{t('lp.journey.note')}</p>
@@ -744,7 +765,7 @@ function ContentSection() {
       title={t('lp.content.title')}
       sub={t('lp.content.sub')}
       bullets={[t('lp.content.b1'), t('lp.content.b2'), t('lp.content.b3')]}
-      status="planned"
+      status="live"
       note={t('lp.content.note')}
     />
   );
@@ -817,7 +838,7 @@ function RoadmapSection() {
     { n: 1, status: 'done', tone: 'live' },
     { n: 2, status: 'done', tone: 'live' },
     { n: 3, status: 'partial', tone: 'partial' },
-    { n: 4, status: 'planned', tone: 'planned' },
+    { n: 4, status: 'done', tone: 'live' },
     { n: 5, status: 'partial', tone: 'partial' },
     { n: 6, status: 'partial', tone: 'partial' },
   ];
