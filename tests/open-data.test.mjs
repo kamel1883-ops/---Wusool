@@ -334,10 +334,19 @@ async function connectorChecks() {
 
   // --- Stable failure codes -------------------------------------------------
   const calls = [];
+  let overpassAttempts = 0;
   const stubFetch = async (url) => {
+    if (!String(url).includes('overpass-api.de')) return new Response('{\"elements\":[]}', { status: 200 });
     calls.push(String(url));
     if (String(url).includes('overpass-api.de')) {
-      return new Response('# 502 Gateway Timeout', { status: 502 });
+      overpassAttempts += 1;
+      if (overpassAttempts === 1) {
+        return new Response('# 502 Gateway Timeout', { status: 502 });
+      }
+      return new Response(JSON.stringify({ elements: ELEMENTS }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     return new Response(JSON.stringify({ elements: ELEMENTS }), {
       status: 200,
@@ -351,12 +360,12 @@ async function connectorChecks() {
     fetchImpl: stubFetch,
   });
   check(
-    'an at-capacity primary is retried once on the fallback instance',
-    calls.length === 2 && calls[1].includes('kumi') && fallback.leads.length === 2,
+    'an at-capacity primary gets a sequential retry on the same instance',
+    calls.length === 2 && calls[0] === calls[1] && fallback.leads.length === 2,
     calls
   );
   check(
-    'the fallback attempt keeps the same bounded query',
+    'the retry attempt keeps the same bounded query',
     !calls.some((url) => url.includes('?')),
     calls
   );
@@ -368,12 +377,17 @@ async function connectorChecks() {
     .catch((error) => error);
   check('a busy instance reports lead_source_busy', busyError?.code === 'lead_source_busy', busyError?.code);
   const timeoutCalls = [];
+  let timeoutAttempts = 0;
   const timeoutPrimaryFetch = async (url) => {
+    if (!String(url).includes('overpass-api.de')) return new Response('{\"elements\":[]}', { status: 200 });
     timeoutCalls.push(String(url));
     if (String(url).includes('overpass-api.de')) {
-      const error = new Error('overpass_timeout');
-      error.name = 'AbortError';
-      throw error;
+      timeoutAttempts += 1;
+      if (timeoutAttempts === 1) {
+        const error = new Error('overpass_timeout');
+        error.name = 'AbortError';
+        throw error;
+      }
     }
     return new Response(JSON.stringify({ elements: ELEMENTS }), {
       status: 200,
@@ -388,8 +402,8 @@ async function connectorChecks() {
     fetchImpl: timeoutPrimaryFetch,
   });
   check(
-    'a timed-out primary is retried on the next mirror',
-    timeoutCalls.length === 2 && afterTimeout.leads.length === 2,
+    'a timed-out primary gets a sequential retry',
+    timeoutCalls.length === 2 && timeoutCalls[0] === timeoutCalls[1] && afterTimeout.leads.length === 2,
     timeoutCalls
   );
   await busy.close();

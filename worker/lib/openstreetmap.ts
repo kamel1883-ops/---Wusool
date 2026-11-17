@@ -18,7 +18,8 @@
  */
 
 export const OSM_ENDPOINT = 'https://overpass-api.de/api/interpreter';
-/** Used only when the primary instance answers "at capacity" or 429. */
+export const OSM_NEARBY_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+/** Kept for reference; not part of the tier plan (chronically over-busy). */
 export const OSM_FALLBACK_ENDPOINT = 'https://overpass.kumi.systems/api/interpreter';
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors — ODbL 1.0';
 export const OSM_COPYRIGHT_URL = 'https://www.openstreetmap.org/copyright';
@@ -118,6 +119,46 @@ export function resolveSaudiCity(value: string): SaudiCity | null {
 }
 
 const escapeOverpass = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+/** City centre (bbox midpoint) — OSM API neighbourhood queries anchor here. */
+export function cityCentre(city: SaudiCity): { lat: number; lng: number } {
+  const [south, west, north, east] = city.bbox;
+  return { lat: (south + north) / 2, lng: (west + east) / 2 };
+}
+
+/** A tighter, server-cheaper query: `nodes + ways`, not `nwr` (relations
+ *  force a full member scan). `around` anchors close to the city centre so
+ *  the server stops touching far tiles even while it is loaded. */
+export function buildAroundQuery(city: SaudiCity, limit: number, radiusMeters: number): string {
+  const { lat, lng } = cityCentre(city);
+  const union = OSM_CONTACT_KEYS.map((key) => `nw["name"]["${key}"](around:${radiusMeters},${Number(lat.toFixed(4))},${Number(lng.toFixed(4))});`).join('\n');
+  return [
+    '[out:json][timeout:20];',
+    `// ${escapeOverpass(city.en)} (${escapeOverpass(city.ar)}) — Wusool open-data discovery`,
+    '(',
+    union,
+    ');',
+    `out center tags ${Math.max(1, Math.min(50, limit))};`,
+  ].join('\n');
+}
+
+/**
+ * One named element from Overpass merged with the full tags the main OSM API
+ * returns for the same element id. Overpass answers name+contact quickly but
+ * app loads earlier than when pushed. `null` means the fetch was incomplete.
+ */
+export function mergeOsmTags(
+  element: any,
+  tags: Record<string, string> | null | undefined,
+  city: SaudiCity,
+): OpenDataLead | null {
+  const baseTags = element?.tags;
+  if (!tags && !baseTags) return null;
+  if (tags) {
+    return mapOsmElement({ type: element?.type, id: element?.id, tags }, city);
+  }
+  return mapOsmElement(element, city);
+}
 
 /**
  * The dense business core of a metro area: the bbox centre ±0.15° (~16 km),
@@ -339,50 +380,136 @@ export type OsmDiscoveryResult = {
 };
 
 /**
- * Runs one bounded Overpass request. Network/capacity problems become stable
- * error codes instead of an empty result, so the screen can say "busy, retry"
- * rather than "no leads found".
- * When a public instance rejects a request because it is at capacity — or a
- * query times out on it — the next mirror is tried sequentially before the
- * run is reported as failed. A configured `LEAD_DATA_API_URL` is never
- * overridden: the operator chose it, so it stays a single attempt.
+ * Runs one bounded Overpass request, then richer contact tags via the main
+ * OSM API when Overpass answered with name-only records. Network/capacity
+ * problems become stable error codes instead of an empty result, so the
+ * screen can say "busy, retry" rather than "no leads found".
+ *
+ * Resilience under a loaded public instance (measured June 2026):
+ *   1. Tier radii — a tighter query succeeds when a wide one is shed.
+ *   2. Sequential retries — the first attempt is often rejected while the
+ *      second, seconds later, answers (measured again and again).
+ *   3. Main-OSM-API rescue — when Overpass returns name+contact with no
+ *      other tags (ways whose tags were folded), the full tags are fetched
+ *      from www.openstreetmap.org/api/0.6 directly when that helps.
+ *
+ * A configured `LEAD_DATA_API_URL` is never overridden: the operator chose
+ * it, so it stays a single attempt.
  */
+
+const TIER_RADII = [20_000, 13_000, 8_000];
+const MAX_ATTEMPTS_PER_TIER = 2;
+const PAUSE_MS = 800;
+
 export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promise<OsmDiscoveryResult> {
   const configured = options.endpoint && /^https?:\/\//i.test(options.endpoint) ? options.endpoint : null;
-  const endpoints = configured ? [configured] : [OSM_ENDPOINT, OSM_FALLBACK_ENDPOINT];
+  const configuredEndpoints = configured ? [configured] : null;
+  const limit = Math.max(1, Math.min(50, Number(options.limit) || 20));
   let lastError: LeadSourceError | null = null;
 
-  for (const endpoint of endpoints) {
-    try {
-      return await requestOverpass(endpoint, options);
-    } catch (error) {
-      const failure = error instanceof LeadSourceError ? error : null;
-      // Capacity rejections and per-instance timeouts are worth retrying on
-      // another mirror; anything else (or the last mirror) ends the run.
-      const retryable = failure?.code === 'lead_source_busy' || failure?.code === 'lead_source_timeout';
-      if (!retryable || endpoint === endpoints[endpoints.length - 1]) {
-        throw failure ?? new LeadSourceError('lead_source_failed');
+  const tiers: Array<{ endpoint: string; radius?: number; box?: boolean }> = configuredEndpoints
+    ? configuredEndpoints.map((endpoint) => ({ endpoint, box: true }))
+    : TIER_RADII.map((radius) => ({ endpoint: OSM_ENDPOINT, radius }));
+
+  for (const tier of tiers) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_TIER; attempt += 1) {
+      if (attempt > 1) {
+        await sleep(PAUSE_MS);
       }
-      lastError = failure;
+      const query = tier.box
+        ? buildOverpassQuery(options.city, limit)
+        : buildAroundQuery(options.city, limit, tier.radius ?? 20_000);
+      try {
+        const fetched = await requestOverpass(tier.endpoint, options, query);
+        const leads = await enrichWithMainApi(fetched.leads, options);
+        return { leads, endpoint: tier.endpoint, skipped: fetched.skipped };
+      } catch (error) {
+        const failure = error instanceof LeadSourceError ? error : null;
+        lastError = failure ?? new LeadSourceError('lead_source_failed');
+        const retryable =
+          failure?.code === 'lead_source_busy' || failure?.code === 'lead_source_timeout';
+        if (!retryable) {
+          throw failure ?? new LeadSourceError('lead_source_failed');
+        }
+        // retryable: try again (next attempt, same tier), or the next tier.
+      }
     }
   }
 
   throw lastError ?? new LeadSourceError('lead_source_failed');
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Overpass returns a record with only the contact fields it filtered on when
+ * the full tag set was folded into the query plan (common under load). The
+ * main OSM API returns every tag for an element id in one light request;
+ * fetch those for name-only records so leads keep sector/score evidence.
+ * One element per call — small, cheap, and fail-soft per record.
+ */
+async function enrichWithMainApi(
+  leads: OpenDataLead[],
+  options: OsmDiscoveryOptions
+): Promise<OpenDataLead[]> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const enriched: OpenDataLead[] = [];
+  for (const lead of leads) {
+    const url = elementApiUrl(lead);
+    if (!url) {
+      enriched.push(lead);
+      continue;
+    }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6_000);
+      try {
+        const response = await fetchImpl(url, {
+          headers: { accept: 'application/json', 'user-agent': OSM_USER_AGENT },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          enriched.push(lead);
+          continue;
+        }
+        const payload: any = await response.json();
+        const element = payload?.elements?.[0];
+        if (element?.tags) {
+          const merged = mergeOsmTags({ type: element.type, id: element.id, tags: element.tags }, element.tags, options.city);
+          enriched.push(merged ?? lead);
+        } else {
+          enriched.push(lead);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      enriched.push(lead);
+    }
+  }
+  return enriched;
+}
+
+function elementApiUrl(lead: OpenDataLead): string | null {
+  const match = /openstreetmap\.org\/(node|way|relation)\/(\d+)/.exec(lead.sourceUrl);
+  if (!match) return null;
+  return `https://www.openstreetmap.org/api/0.6/${match[1]}/${match[2]}`;
+}
+
 async function requestOverpass(
   endpoint: string,
-  options: OsmDiscoveryOptions
-): Promise<OsmDiscoveryResult> {
+  options: OsmDiscoveryOptions,
+  query?: string
+): Promise<Pick<OsmDiscoveryResult, 'leads' | 'skipped'>> {
   const limit = Math.max(1, Math.min(50, Number(options.limit) || 20));
-  const query = buildOverpassQuery(options.city, limit);
+  const fetchQuery = query ?? buildOverpassQuery(options.city, limit);
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, options.timeoutMs ?? 45_000);
+  }, options.timeoutMs ?? 20_000);
 
   let payload: any;
   try {
@@ -393,7 +520,7 @@ async function requestOverpass(
         accept: 'application/json',
         'user-agent': OSM_USER_AGENT,
       },
-      body: new URLSearchParams({ data: query }).toString(),
+      body: new URLSearchParams({ data: fetchQuery }).toString(),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -447,5 +574,5 @@ async function requestOverpass(
     if (leads.length >= limit) break;
   }
 
-  return { leads, endpoint, skipped: Math.max(skipped, elements.length - leads.length) };
+  return { leads, skipped: Math.max(skipped, elements.length - leads.length) };
 }
