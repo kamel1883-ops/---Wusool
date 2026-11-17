@@ -262,9 +262,10 @@ async function connectorChecks() {
   check('empty city is not supported', osm.resolveSaudiCity('') === null);
 
   const query = osm.buildOverpassQuery(riyadh, 12);
-  check('query targets the city bounding box', query.includes('(24.3,46.2,25.1,47.2)'), query);
+  check('query targets the dense city core, not the metro sprawl', query.includes('(24.55,46.55,24.85,46.85)'), query);
   check('query caps the returned elements', query.includes('out center tags 12;'), query);
-  check('query requires a published contact detail', query.includes('phone|contact:phone'), query);
+  check('query asks exact indexed contact keys', query.includes('["phone"]') && query.includes('["contact:phone"]'), query);
+  check('query avoids a regex key scan that loaded servers kill', !query.includes('~"^'), query);
   check('query does not ask for a key', !/authorization/i.test(query));
   check('query cap cannot exceed 50', osm.buildOverpassQuery(riyadh, 5000).includes('out center tags 50;'));
 

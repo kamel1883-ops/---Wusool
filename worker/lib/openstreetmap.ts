@@ -20,7 +20,6 @@
 export const OSM_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 /** Used only when the primary instance answers "at capacity" or 429. */
 export const OSM_FALLBACK_ENDPOINT = 'https://overpass.kumi.systems/api/interpreter';
-export const OSM_FALLBACK_ENDPOINT_2 = 'https://overpass.nchc.org.tw/api/interpreter';
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors — ODbL 1.0';
 export const OSM_COPYRIGHT_URL = 'https://www.openstreetmap.org/copyright';
 export const OSM_USER_AGENT = 'Wusool/1.0 (lead discovery; +https://openstreetmap.org/copyright)';
@@ -121,17 +120,44 @@ export function resolveSaudiCity(value: string): SaudiCity | null {
 const escapeOverpass = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
 /**
- * Builds one bounded Overpass query: named business-like elements that publish
- * at least one contact detail inside the city box, capped at `limit`.
+ * The dense business core of a metro area: the bbox centre ±0.15° (~16 km),
+ * clamped inside the metro bbox. Public Overpass instances shed heavy queries
+ * under load, so discovery scans the core where listed businesses cluster
+ * instead of the whole administrative sprawl.
+ */
+export function coreBox(city: SaudiCity): string {
+  const [south, west, north, east] = city.bbox;
+  const midLat = (south + north) / 2;
+  const midLng = (west + east) / 2;
+  const round2 = (value: number) => Number(value.toFixed(2));
+  const coreSouth = Math.max(south, round2(midLat - 0.15));
+  const coreWest = Math.max(west, round2(midLng - 0.15));
+  const coreNorth = Math.min(north, round2(midLat + 0.15));
+  const coreEast = Math.min(east, round2(midLng + 0.15));
+  return `${coreSouth},${coreWest},${coreNorth},${coreEast}`;
+}
+
+/** Contact details solicited from OSM. The sector is read client-side from tags. */
+export const OSM_CONTACT_KEYS = [
+  'phone',
+  'contact:phone',
+  'website',
+  'contact:website',
+  'email',
+  'contact:email',
+];
+
+/**
+ * Builds one bounded Overpass query: named elements that publish at least one
+ * contact detail inside the city core, capped at `limit`. Every arm is an
+ * exact-key match that uses the server index — a regex key scan over a whole
+ * metro area is what gets killed on loaded public instances.
  */
 export function buildOverpassQuery(city: SaudiCity, limit: number): string {
-  const [south, west, north, east] = city.bbox;
-  const box = `${south},${west},${north},${east}`;
-  const contact = '[~"^(phone|contact:phone|website|contact:website|email|contact:email)$"~"^.+$"]';
-  const kinds = ['amenity', 'shop', 'office', 'healthcare', 'tourism'];
-  const union = kinds.map((kind) => `  nwr["name"]${contact}["${kind}"](${box});`).join('\n');
+  const box = coreBox(city);
+  const union = OSM_CONTACT_KEYS.map((key) => `  nwr["name"]["${key}"](${box});`).join('\n');
   return [
-    '[out:json][timeout:25];',
+    '[out:json][timeout:20];',
     `// ${escapeOverpass(city.en)} (${escapeOverpass(city.ar)}) — Wusool open-data discovery`,
     '(',
     union,
@@ -323,9 +349,7 @@ export type OsmDiscoveryResult = {
  */
 export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promise<OsmDiscoveryResult> {
   const configured = options.endpoint && /^https?:\/\//i.test(options.endpoint) ? options.endpoint : null;
-  const endpoints = configured
-    ? [configured]
-    : [OSM_ENDPOINT, OSM_FALLBACK_ENDPOINT, OSM_FALLBACK_ENDPOINT_2];
+  const endpoints = configured ? [configured] : [OSM_ENDPOINT, OSM_FALLBACK_ENDPOINT];
   let lastError: LeadSourceError | null = null;
 
   for (const endpoint of endpoints) {
@@ -358,7 +382,7 @@ async function requestOverpass(
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, options.timeoutMs ?? 30_000);
+  }, options.timeoutMs ?? 45_000);
 
   let payload: any;
   try {
