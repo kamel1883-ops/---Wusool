@@ -366,6 +366,31 @@ async function connectorChecks() {
     .then(() => null)
     .catch((error) => error);
   check('a busy instance reports lead_source_busy', busyError?.code === 'lead_source_busy', busyError?.code);
+  const timeoutCalls = [];
+  const timeoutPrimaryFetch = async (url) => {
+    timeoutCalls.push(String(url));
+    if (String(url).includes('overpass-api.de')) {
+      const error = new Error('overpass_timeout');
+      error.name = 'AbortError';
+      throw error;
+    }
+    return new Response(JSON.stringify({ elements: ELEMENTS }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const afterTimeout = await osm.discoverOpenDataLeads({
+    endpoint: null,
+    city: riyadh,
+    limit: 5,
+    timeoutMs: 5000,
+    fetchImpl: timeoutPrimaryFetch,
+  });
+  check(
+    'a timed-out primary is retried on the next mirror',
+    timeoutCalls.length === 2 && afterTimeout.leads.length === 2,
+    timeoutCalls
+  );
   await busy.close();
 
   const html = await startOverpassMock({ status: 200, body: '<html>maintenance</html>' });

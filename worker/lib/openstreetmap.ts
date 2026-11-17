@@ -20,6 +20,7 @@
 export const OSM_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 /** Used only when the primary instance answers "at capacity" or 429. */
 export const OSM_FALLBACK_ENDPOINT = 'https://overpass.kumi.systems/api/interpreter';
+export const OSM_FALLBACK_ENDPOINT_2 = 'https://overpass.nchc.org.tw/api/interpreter';
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors — ODbL 1.0';
 export const OSM_COPYRIGHT_URL = 'https://www.openstreetmap.org/copyright';
 export const OSM_USER_AGENT = 'Wusool/1.0 (lead discovery; +https://openstreetmap.org/copyright)';
@@ -315,13 +316,16 @@ export type OsmDiscoveryResult = {
  * Runs one bounded Overpass request. Network/capacity problems become stable
  * error codes instead of an empty result, so the screen can say "busy, retry"
  * rather than "no leads found".
- * When the default public instance rejects a request because it is at capacity,
- * exactly one sequential attempt is made against the fallback instance. A
- * configured `LEAD_DATA_API_URL` is never overridden: the operator chose it.
+ * When a public instance rejects a request because it is at capacity — or a
+ * query times out on it — the next mirror is tried sequentially before the
+ * run is reported as failed. A configured `LEAD_DATA_API_URL` is never
+ * overridden: the operator chose it, so it stays a single attempt.
  */
 export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promise<OsmDiscoveryResult> {
   const configured = options.endpoint && /^https?:\/\//i.test(options.endpoint) ? options.endpoint : null;
-  const endpoints = configured ? [configured] : [OSM_ENDPOINT, OSM_FALLBACK_ENDPOINT];
+  const endpoints = configured
+    ? [configured]
+    : [OSM_ENDPOINT, OSM_FALLBACK_ENDPOINT, OSM_FALLBACK_ENDPOINT_2];
   let lastError: LeadSourceError | null = null;
 
   for (const endpoint of endpoints) {
@@ -329,9 +333,10 @@ export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promi
       return await requestOverpass(endpoint, options);
     } catch (error) {
       const failure = error instanceof LeadSourceError ? error : null;
-      // Only a fast "at capacity" answer is retried; a timeout already used
-      // the caller's whole patience budget.
-      if (!failure || failure.code !== 'lead_source_busy' || endpoint === endpoints[endpoints.length - 1]) {
+      // Capacity rejections and per-instance timeouts are worth retrying on
+      // another mirror; anything else (or the last mirror) ends the run.
+      const retryable = failure?.code === 'lead_source_busy' || failure?.code === 'lead_source_timeout';
+      if (!retryable || endpoint === endpoints[endpoints.length - 1]) {
         throw failure ?? new LeadSourceError('lead_source_failed');
       }
       lastError = failure;
