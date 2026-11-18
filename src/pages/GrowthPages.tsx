@@ -760,6 +760,11 @@ function LeadsPanel({
                       {lead.email}
                     </div>
                   ) : null}
+                  {lead.phone ? (
+                    <div className="muted small" dir="ltr">
+                      {lead.phone}
+                    </div>
+                  ) : null}
                 </td>
                 <td>
                   {lead.sector || '—'}

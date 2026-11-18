@@ -319,6 +319,23 @@ async function connectorChecks() {
   check('an element without contact data is dropped', osm.mapOsmElement(ELEMENTS[3], riyadh) === null);
   check('malformed input is dropped', osm.mapOsmElement({ type: 'node' }, riyadh) === null);
 
+  // Direct-contact rule: a website alone is not contact data and must never
+  // reach the tenant; only a phone or an email qualifies.
+  check('phone alone is a direct contact', osm.hasDirectContact({ phone: '+966112233445' }) === true);
+  check('email alone is a direct contact', osm.hasDirectContact({ email: 'info@example.sa' }) === true);
+  check('website alone is NOT a direct contact', osm.hasDirectContact({ website: 'https://example.sa' }) === false);
+  check('no phone and no email is NOT a direct contact', osm.hasDirectContact({}) === false);
+  check('a too-short number is NOT a direct contact', osm.hasDirectContact({ phone: '123' }) === false);
+  check(
+    'a tel: link on the business homepage is extracted as the phone',
+    osm.extractPhonesFromHtml('<a href="tel:+966114455544">call</a>')[0] === '+966114455544'
+  );
+  check(
+    'a printed Saudi mobile on the homepage is extracted',
+    osm.extractPhonesFromHtml('<p>اتصل بنا 0551234567</p>').length >= 1
+  );
+  check('no phone on the homepage means nothing is invented', osm.extractPhonesFromHtml('<p>مرحبا بكم</p>').length === 0);
+
   // --- A real request against the local Overpass stand-in -------------------
   const mock = await startOverpassMock({
     body: JSON.stringify({ version: 0.6, elements: ELEMENTS }),

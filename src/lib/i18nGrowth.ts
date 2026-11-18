@@ -105,7 +105,7 @@ export const GROWTH_AR: Record<string, string> = {
     'نتائج الاكتشاف تُخزَّن كعملاء محتملين، لا كعملاء مؤكدين. التأكيد يحدث فقط بتغيير المرحلة أو تسجيل الموافقة يدويًا.',
   'growth.matchScoreLabel': 'درجة التطابق مع نشاطك',
   'growth.osmNote':
-    'بيانات OpenStreetMap © مساهمو OpenStreetMap، بترخيص ODbL. تُعرض كشركات محتملة حسب الموقع والنشاط وتحتاج مراجعة بشرية.',
+    'بيانات OpenStreetMap © مساهمو OpenStreetMap، بترخيص ODbL. تُعرض كشركات محتملة حسب الموقع والنشاط، ويظهر فقط من له هاتف أو بريد تواصل وتحتاج مراجعة بشرية.',
   'growth.details': 'التفاصيل',
   'growth.logContact': 'سجل التواصل',
   'growth.whyLead': 'لماذا رُشِّح هذا العميل',
@@ -392,7 +392,7 @@ export const GROWTH_EN: Record<string, string> = {
     'Discovered records are stored as potential leads, not confirmed customers. Only a manual stage change or recorded consent confirms one.',
   'growth.matchScoreLabel': 'Match with your activity',
   'growth.osmNote':
-    'OpenStreetMap data © OpenStreetMap contributors, under the ODbL. Shown as potential companies by location and activity, and they need human review.',
+    'OpenStreetMap data © OpenStreetMap contributors, under the ODbL. Shown as potential companies by location and activity — only those with a phone or email are shown — and they need human review.',
   'growth.details': 'Details',
   'growth.logContact': 'Contact log',
   'growth.whyLead': 'Why this lead was suggested',

@@ -368,6 +368,49 @@ export type OpenDataLead = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const DOMAIN_RE = /^[\w-]+(\.[\w-]+)+([/?#].*)?$/;
 
+/**
+ * A lead is only usable when it carries a direct contact channel — a phone
+ * number or an email. A website alone is not contact data: the tenant cannot
+ * call, message or email it, so website-only records are dropped (after the
+ * homepage rescue below has had a chance to find a real phone/email).
+ */
+export function hasDirectContact(
+  lead: { phone?: string | null; email?: string | null } | null | undefined
+): boolean {
+  if (!lead) return false;
+  const digits = String(lead.phone ?? '').replace(/[^0-9]/g, '');
+  if (digits.length >= 7) return true;
+  return EMAIL_RE.test(String(lead.email ?? '').trim().toLowerCase());
+}
+
+/**
+ * Pulls Saudi phone numbers out of a business homepage. `tel:` links are
+ * tried first (the site declares them as numbers), then the common Saudi
+ * shapes (+966…, 05…, 01…, 920…, 800…). Returns the first few distinct
+ * plausible numbers; never invents one.
+ */
+export function extractPhonesFromHtml(html: string): string[] {
+  const text = String(html ?? '');
+  if (!text) return [];
+  const found: string[] = [];
+  const push = (raw: string) => {
+    const digits = String(raw ?? '').replace(/[^0-9]/g, '');
+    const plausible =
+      (digits.startsWith('966') && digits.length >= 12) ||
+      (digits.startsWith('0') && digits.length >= 9) ||
+      ((digits.startsWith('920') || digits.startsWith('800')) && digits.length >= 9 && digits.length <= 12);
+    if (!plausible) return;
+    const clean = String(raw ?? '').trim().slice(0, 40);
+    if (clean && !found.includes(clean) && found.length < 3) found.push(clean);
+  };
+  for (const match of text.matchAll(/href=["']tel:([^"'#]+)/gi)) push(match[1]);
+  if (found.length) return found;
+  const generic =
+    /(?:\+?966[\s-]?[0-9][0-9\s-]{7,}|\b0(?:5[0-9]|1[0-9]|2[0-9]|9[0-9])[\s-]?[0-9][0-9\s-]{6,}|\b(?:920|800)[\s-]?[0-9][0-9\s-]{5,})/g;
+  for (const match of text.matchAll(generic)) push(match[0]);
+  return found;
+}
+
 /** OSM contributors write `example.com` as often as `https://example.com`. */
 export function normalizeWebsite(value: string): string | null {
   const raw = String(value ?? '').trim();
@@ -525,8 +568,17 @@ export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promi
       try {
         const fetched = await requestOverpass(tier.endpoint, options, query);
         const enriched = await enrichWithMainApi(fetched.leads, options);
-        const leads = await enrichEmailsFromWebsites(enriched, options);
-        return { leads, endpoint: tier.endpoint, skipped: fetched.skipped };
+        const withContacts = await enrichContactsFromWebsites(enriched, options);
+        // Hard rule: no phone and no email = not a lead. Website-only
+        // records that the homepage rescue could not turn into a direct
+        // contact are dropped here, never shown to the tenant.
+        const leads = withContacts.filter(hasDirectContact);
+        const droppedNoContact = withContacts.length - leads.length;
+        return {
+          leads,
+          endpoint: tier.endpoint,
+          skipped: fetched.skipped + droppedNoContact,
+        };
       } catch (error) {
         const failure = error instanceof LeadSourceError ? error : null;
         lastError = failure ?? new LeadSourceError('lead_source_failed');
@@ -599,13 +651,14 @@ async function enrichOneWithMainApi(
 }
 
 /**
- * Many OSM records publish a website but no email. Fetching the business's
- * own homepage for a published `mailto:` / contact email is public data,
- * not scraping a directory — the address is stored with the same
- * `public_page` source the leads table already accepts. Bounded: at most
- * 8 sites, 6s each, fail-soft per record, and placeholder domains skipped.
+ * Many OSM records publish a website but no email and/or no phone. Fetching
+ * the business's own homepage for a published `mailto:` / contact email or
+ * a `tel:` / printed phone number is public data, not scraping a directory
+ * — the values are stored with the same `public_page` source the leads
+ * table already accepts. Bounded: at most 8 sites, 6s each, fail-soft per
+ * record, and placeholder domains skipped.
  */
-async function enrichEmailsFromWebsites(
+async function enrichContactsFromWebsites(
   leads: OpenDataLead[],
   options: OsmDiscoveryOptions
 ): Promise<OpenDataLead[]> {
@@ -613,7 +666,7 @@ async function enrichEmailsFromWebsites(
   const enriched: OpenDataLead[] = [];
   let visited = 0;
   for (const lead of leads) {
-    if (lead.email || !lead.website || visited >= 8) {
+    if ((lead.email && lead.phone) || !lead.website || visited >= 8) {
       enriched.push(lead);
       continue;
     }
@@ -644,11 +697,18 @@ async function enrichEmailsFromWebsites(
         }
         const html = (await response.text()).slice(0, 300_000);
         const mailto = /mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/i.exec(html)?.[1];
-        const found = mailto ?? [...html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)]
+        const foundEmail = mailto ?? [...html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)]
           .map((match) => match[0])
           .find((address) => !/^(noreply|no-reply|postmaster|mailer-daemon)@/i.test(address) && !/example\./i.test(address));
-        if (found) {
-          enriched.push({ ...lead, email: found.toLowerCase().slice(0, 200), emailSource: 'public_page' });
+        const foundPhone = lead.phone ? undefined : extractPhonesFromHtml(html)[0];
+        if (foundEmail || foundPhone) {
+          enriched.push({
+            ...lead,
+            email: lead.email ?? (foundEmail ? foundEmail.toLowerCase().slice(0, 200) : undefined),
+            emailSource: lead.email || foundEmail ? 'public_page' : undefined,
+            phone: lead.phone ?? foundPhone,
+            phoneSource: lead.phone || foundPhone ? 'public_page' : undefined,
+          });
         } else {
           enriched.push(lead);
         }

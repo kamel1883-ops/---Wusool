@@ -909,6 +909,12 @@ app.post('/:companyId/growth/discover', async (c) => {
       skipped += 1;
       continue;
     }
+    // Hard rule (same as the open-data path): a lead without a phone and
+    // without an email is not saved — the tenant cannot contact it.
+    if (!email && !phone) {
+      skipped += 1;
+      continue;
+    }
 
     const scored = scoreLead(
       {
