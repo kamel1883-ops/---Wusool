@@ -12,10 +12,9 @@
  *    into short marketing copy. It never invents company facts and never
  *    calls the network, so the studio still works offline/demo deployments.
  *
- * Image generation is a separate, opt-in step (`AI_IMAGE_MODEL`): only when
- * that secret is set does the server ask the gateway for a raster image.
- * Without it, the studio's image is the server-rendered poster (SVG) built
- * from the generated headline — the same artefact the posters tab approves.
+ * Image generation is free and open-source via Pollinations.ai
+ * (image.pollinations.ai — no key, no signup). The SVG poster stays as
+ * the fallback when the free service is rate-limited or unreachable.
  */
 
 import { extractJsonObject, isUsableGatewayUrl } from '../ai/openai';
@@ -290,78 +289,51 @@ export async function buildAiDraft(
 }
 
 export type StudioImageResult =
-  | { kind: 'url'; url: string; source: 'gemini' | 'ai' }
-  | { kind: 'base64'; base64: string; contentType: string; source: 'gemini' | 'ai' }
+  | { kind: 'url'; url: string; source: 'open' | 'ai' }
+  | { kind: 'base64'; base64: string; contentType: string; source: 'open' | 'ai' }
   | null;
 
-/** Closest Gemini aspect ratio for the requested poster size. */
-const aspectRatioFor = (width: number, height: number): string => {
-  const ratio = width / Math.max(1, height);
-  if (ratio > 1.7) return '21:9';
-  if (ratio > 1.4) return '16:9';
-  if (ratio > 1.15) return '4:3';
-  if (ratio > 0.9) return '1:1';
-  if (ratio > 0.7) return '3:4';
-  return '9:16';
-};
+
 
 /**
- * Professional marketing image generation via Google Gemini (Nano Banana).
+ * Free open-source image generation via Pollinations.ai.
  *
- * Uses a Gemini API key (`GEMINI_API_KEY`, free from Google AI Studio).
- * The model renders the headline/subhead/CTA text directly in the image so
- * the result is a finished social post visual, not a blank illustration.
- * Returns null when no key is configured so the caller can fall back.
+ * No API key, no signup, no charge — a plain GET returns a JPEG.
+ * The anonymous tier is rate-limited (roughly one image per 15-40s and
+ * occasional 402s), so we retry with back-off. The headline text is
+ * included in the prompt as a hint; the caption carries the exact copy.
+ * Returns null when the service fails so the caller can fall back to
+ * the SVG poster instead of erroring the whole generation.
  */
-export async function generateGeminiImage(
-  env: { GEMINI_API_KEY?: string; GOOGLE_AI_API_KEY?: string; GEMINI_IMAGE_MODEL?: string },
+export async function generateOpenImage(
   prompt: string,
-  headline: string,
-  subhead: string,
-  cta: string,
-  language: 'ar' | 'en',
   width: number,
-  height: number
+  height: number,
+  seed: number
 ): Promise<StudioImageResult> {
-  const apiKey = String(env.GEMINI_API_KEY ?? env.GOOGLE_AI_API_KEY ?? '').trim();
-  if (!apiKey) return null;
-  const model = String(env.GEMINI_IMAGE_MODEL ?? 'gemini-2.5-flash-image').trim() || 'gemini-2.5-flash-image';
-  const text = [
-    headline ? `Headline (render exactly, large bold, ${language === 'ar' ? 'Arabic' : 'English'}): ${headline}` : '',
-    subhead ? `Subheadline (smaller, below headline): ${subhead}` : '',
-    cta ? `CTA button text (small pill at bottom): ${cta}` : '',
-    `Scene: ${prompt}`,
-    'Style: professional Saudi B2B social media ad, clean modern design, high quality, natural lighting, brand-safe colors, no watermark, no logos, no mockups, crisp Arabic typography, balanced composition with image on one side and text panel on the other side',
-  ].filter(Boolean).join('\n');
-
-  let response: Response;
-  try {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text }] }],
-          generationConfig: {
-            responseModalities: ['TEXT', 'IMAGE'],
-            imageConfig: { aspectRatio: aspectRatioFor(width, height) },
-          },
-        }),
-        signal: AbortSignal.timeout(120_000),
+  const w = Math.min(1024, Math.max(256, Math.round(width)));
+  const h = Math.min(1024, Math.max(256, Math.round(height)));
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${seed}&nologo=true&enhance=true`;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      if (!response.ok) {
+        if (attempt < 3) await sleep(2500 * attempt);
+        continue;
       }
-    );
-  } catch {
-    return null;
-  }
-  if (!response.ok) return null;
-  const payload: any = await response.json().catch(() => null);
-  const parts = payload?.candidates?.[0]?.content?.parts ?? [];
-  for (const part of parts) {
-    const data = part?.inlineData?.data;
-    const mime = part?.inlineData?.mimeType;
-    if (typeof data === 'string' && data) {
-      return { kind: 'base64', base64: data, contentType: String(mime ?? 'image/png'), source: 'gemini' };
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length < 1000) {
+        if (attempt < 3) await sleep(2500 * attempt);
+        continue;
+      }
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      }
+      return { kind: 'base64', base64: btoa(binary), contentType: 'image/jpeg', source: 'open' };
+    } catch {
+      if (attempt < 3) await sleep(2500 * attempt);
     }
   }
   return null;
@@ -377,21 +349,24 @@ export async function generateStudioImage(
     AI_API_KEY?: string;
     AI_GATEWAY_URL?: string;
     AI_IMAGE_MODEL?: string;
-    GEMINI_API_KEY?: string;
-    GOOGLE_AI_API_KEY?: string;
-    GEMINI_IMAGE_MODEL?: string;
   },
   prompt: string,
   width: number,
   height: number,
   headline = '',
-  subhead = '',
-  cta = '',
-  language: 'ar' | 'en' = 'ar'
+  _subhead = '',
+  _cta = '',
+  _language: 'ar' | 'en' = 'ar'
 ): Promise<StudioImageResult> {
-  // Gemini first — professional Nano Banana images with rendered text.
-  const gemini = await generateGeminiImage(env, prompt, headline, subhead, cta, language, width, height);
-  if (gemini) return gemini;
+  // Free open-source images first (Pollinations, no key). The seed varies
+  // per call so a regeneration does not return the cached same image.
+  const openImage = await generateOpenImage(
+    headline ? `${prompt} — professional Saudi social media ad, clean modern design, high quality, no watermark, no logos, no text` : prompt,
+    width,
+    height,
+    Math.floor(Math.random() * 1000000)
+  );
+  if (openImage) return openImage;
   const apiKey = String(env.AI_API_KEY ?? '');
   const imageModel = String(env.AI_IMAGE_MODEL ?? '').trim();
   if (!apiKey || !imageModel) return null;

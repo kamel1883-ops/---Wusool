@@ -1056,11 +1056,11 @@ app.post('/:companyId/social/studio/generate', async (c) => {
     timestamp
   );
 
-  // Professional AI image (Gemini Nano Banana with rendered headline text).
-  // The SVG poster above remains the fallback when no image provider is set.
+  // Free open-source AI image (Pollinations — no key). The SVG poster
+  // above remains the fallback when the free service is unreachable.
   let imageUrl: string | null = null;
   let imagePreviewUrl: string | null = null;
-  let imageSource: 'gemini' | 'ai' | 'poster' = 'poster';
+  let imageSource: 'open' | 'ai' | 'poster' = 'poster';
   const generated = await generateStudioImage(
     c.env as any,
     draft.imagePrompt,

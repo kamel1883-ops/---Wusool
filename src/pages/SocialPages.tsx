@@ -1405,7 +1405,7 @@ type StudioDraft = {
   posterPreviewUrl: string;
   imageUrl: string | null;
   imagePreviewUrl: string | null;
-  imageSource?: 'gemini' | 'ai' | 'poster';
+  imageSource?: 'open' | 'ai' | 'poster';
   variant: number;
 };
 
@@ -1578,10 +1578,10 @@ function StudioTab({
               <>
                 <figure className="studio-image">
                   <img src={draft.imagePreviewUrl ?? draft.imageUrl ?? draft.posterPreviewUrl} alt={draft.headline} />
-                  {draft.imageSource === 'gemini' ? (
-                    <figcaption className="muted small">✨ {t('social.studio.aiImageGemini', 'صورة مولّدة بالذكاء الاصطناعي (Gemini) — نص ظاهر داخل الصورة')}</figcaption>
+                  {draft.imageSource === 'open' ? (
+                    <figcaption className="muted small">✨ {t('social.studio.aiImageGemini', 'صورة مولّدة بالذكاء الاصطناعي — مجاني ومفتوح المصدر، بدون مفتاح')}</figcaption>
                   ) : draft.imageSource === 'poster' ? (
-                    <figcaption className="muted small">{t('social.studio.posterFallback', 'بدون مفتاح صور ذكي — هذا تصميم نصي')}</figcaption>
+                    <figcaption className="muted small">{t('social.studio.posterFallback', 'تعذّر توليد الصورة المجانية الآن (حدّ الخدمة) — هذا تصميم نصي، جرّب إعادة التوليد بعد قليل')}</figcaption>
                   ) : null}
                 </figure>
                 <Field label={t('social.studio.caption')} htmlFor="studio-caption">

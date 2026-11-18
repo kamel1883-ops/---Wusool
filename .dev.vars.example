@@ -13,11 +13,8 @@ APP_ENV=development
 #   AI_GATEWAY_URL=https://api.openai.com/v1
 #   AI_IMAGE_MODEL=            (optional: enables raster image generation in the post studio;
 #                               without it the studio image is the server-rendered poster)
-#   GEMINI_API_KEY=            (professional AI images in the post studio via Google Gemini
-#                               Nano Banana — free key from https://aistudio.google.com/app/apikey
-#                               renders headline+subhead+CTA text inside the image;
-#                               without it the studio falls back to the SVG poster)
-#   GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+#   Studio images are FREE and open-source via Pollinations.ai
+#   (image.pollinations.ai — no key, no signup). No secret needed.
 #   CRAWLER_PROVIDER=cloudflare
 #   CRAWLER_ACCOUNT_ID=
 #   CRAWLER_API_TOKEN=
