@@ -29,7 +29,6 @@ import {
 import { can } from '../lib/rbac';
 import {
   LeadSourceError,
-  OSM_ENDPOINT,
   discoverOpenDataLeads,
   resolveSaudiCity,
   type SaudiCity,
@@ -204,7 +203,9 @@ function leadDataSource(env: any) {
       tableKind: 'organisation_search' as const,
       label: 'OpenStreetMap (ODbL open data)',
       credentialRef: null as string | null,
-      endpoint: endpoint ?? OSM_ENDPOINT,
+      // Null lets the connector rotate the public Overpass mirrors itself;
+      // a configured endpoint is always honoured as-is.
+      endpoint: endpoint ?? null,
       connected: true,
       requires: [
         'لا مفاتيح ولا رسوم — بيانات مفتوحة بترخيص ODbL',

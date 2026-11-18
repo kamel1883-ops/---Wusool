@@ -21,6 +21,20 @@ export const OSM_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 export const OSM_NEARBY_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 /** Kept for reference; not part of the tier plan (chronically over-busy). */
 export const OSM_FALLBACK_ENDPOINT = 'https://overpass.kumi.systems/api/interpreter';
+
+/**
+ * Public Overpass mirrors, tried in order. The main instance frequently
+ * reports "at capacity" (502) under load; the French OSM mirror and NextGIS
+ * answer the same bounded queries without a key, so discovery rotates
+ * across them instead of failing the whole run on one busy server.
+ * A configured `LEAD_DATA_API_URL` always wins over this list.
+ */
+export const OSM_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+  'https://overpass.nextgis.com/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+] as const;
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors — ODbL 1.0';
 export const OSM_COPYRIGHT_URL = 'https://www.openstreetmap.org/copyright';
 export const OSM_USER_AGENT = 'Wusool/1.0 (lead discovery; +https://openstreetmap.org/copyright)';
@@ -407,11 +421,15 @@ export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promi
   const limit = Math.max(1, Math.min(50, Number(options.limit) || 20));
   let lastError: LeadSourceError | null = null;
 
+  // No configured endpoint: rotate the public mirrors, each with its own
+  // radius tiers, so one at-capacity server cannot fail the whole run.
   const tiers: Array<{ endpoint: string; radius?: number; box?: boolean }> = configuredEndpoints
     ? configuredEndpoints.map((endpoint) => ({ endpoint, box: true }))
-    : TIER_RADII.map((radius) => ({ endpoint: OSM_ENDPOINT, radius }));
+    : OSM_ENDPOINTS.flatMap((endpoint) => TIER_RADII.map((radius) => ({ endpoint, radius })));
+  const deadline = Date.now() + 50_000;
 
   for (const tier of tiers) {
+    if (Date.now() > deadline) break;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_TIER; attempt += 1) {
       if (attempt > 1) {
         await sleep(PAUSE_MS);
@@ -421,7 +439,8 @@ export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promi
         : buildAroundQuery(options.city, limit, tier.radius ?? 20_000);
       try {
         const fetched = await requestOverpass(tier.endpoint, options, query);
-        const leads = await enrichWithMainApi(fetched.leads, options);
+        const enriched = await enrichWithMainApi(fetched.leads, options);
+        const leads = await enrichEmailsFromWebsites(enriched, options);
         return { leads, endpoint: tier.endpoint, skipped: fetched.skipped };
       } catch (error) {
         const failure = error instanceof LeadSourceError ? error : null;
@@ -477,6 +496,70 @@ async function enrichWithMainApi(
         if (element?.tags) {
           const merged = mergeOsmTags({ type: element.type, id: element.id, tags: element.tags }, element.tags, options.city);
           enriched.push(merged ?? lead);
+        } else {
+          enriched.push(lead);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      enriched.push(lead);
+    }
+  }
+  return enriched;
+}
+
+/**
+ * Many OSM records publish a website but no email. Fetching the business's
+ * own homepage for a published `mailto:` / contact email is public data,
+ * not scraping a directory — the address is stored with the same
+ * `public_page` source the leads table already accepts. Bounded: at most
+ * 8 sites, 6s each, fail-soft per record, and placeholder domains skipped.
+ */
+async function enrichEmailsFromWebsites(
+  leads: OpenDataLead[],
+  options: OsmDiscoveryOptions
+): Promise<OpenDataLead[]> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const enriched: OpenDataLead[] = [];
+  let visited = 0;
+  for (const lead of leads) {
+    if (lead.email || !lead.website || visited >= 8) {
+      enriched.push(lead);
+      continue;
+    }
+    let host = '';
+    try {
+      host = new URL(lead.website).hostname.toLowerCase();
+    } catch {
+      enriched.push(lead);
+      continue;
+    }
+    if (host.includes('example.') || host === 'localhost' || host.startsWith('127.')) {
+      enriched.push(lead);
+      continue;
+    }
+    visited += 1;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6_000);
+      try {
+        const response = await fetchImpl(lead.website, {
+          headers: { accept: 'text/html,application/xhtml+xml', 'user-agent': OSM_USER_AGENT },
+          signal: controller.signal,
+          redirect: 'follow',
+        });
+        if (!response.ok) {
+          enriched.push(lead);
+          continue;
+        }
+        const html = (await response.text()).slice(0, 300_000);
+        const mailto = /mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/i.exec(html)?.[1];
+        const found = mailto ?? [...html.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)]
+          .map((match) => match[0])
+          .find((address) => !/^(noreply|no-reply|postmaster|mailer-daemon)@/i.test(address) && !/example\./i.test(address));
+        if (found) {
+          enriched.push({ ...lead, email: found.toLowerCase().slice(0, 200), emailSource: 'public_page' });
         } else {
           enriched.push(lead);
         }
