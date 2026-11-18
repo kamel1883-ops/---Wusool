@@ -1081,7 +1081,7 @@ app.post('/:companyId/social/studio/generate', async (c) => {
     await c.env.FILES.put(`studio/${imageId}.${ext}`, bytes, {
       httpMetadata: { contentType: generated.contentType },
     });
-    imagePreviewUrl = `/${company.id}/social/studio/images/${imageId}`;
+    imagePreviewUrl = `${new URL(c.req.url).origin}/api/company/${company.id}/social/studio/images/${imageId}`;
     imageSource = generated.source;
   }
 

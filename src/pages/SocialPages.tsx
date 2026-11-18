@@ -1510,7 +1510,7 @@ function StudioTab({
           ctaLabel: draft.cta,
           language,
           posterId: draft.posterId,
-          imageUrl: draft.imageUrl,
+          imageUrl: draft.imageUrl ?? draft.imagePreviewUrl,
         },
       });
       setSaved(true);
