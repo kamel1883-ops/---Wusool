@@ -1760,6 +1760,7 @@ function PostersTab({
     brandColor: '#0f766e',
     language: 'ar',
   });
+  const [genIdea, setGenIdea] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -1773,7 +1774,36 @@ function PostersTab({
     void load();
   }, [load]);
 
+  // Generate a poster from a plain idea (same engine as the studio):
+  // the server writes headline/subhead/cta and creates the poster draft,
+  // so the client never has to type the headline by hand.
+  const generatePoster = async () => {
+    if (genIdea.trim().length < 3) {
+      onNotice({ tone: 'warn', text: t('social.studio.ideaRequired') });
+      return;
+    }
+    setBusy('generate');
+    try {
+      await api(`${base}/studio/generate`, {
+        method: 'POST',
+        body: { idea: genIdea.trim(), feedback: '', language: form.language === 'en' ? 'en' : 'ar', sizeKey: form.sizeKey, variant: 0, previous: null },
+      });
+      setOpen(false);
+      setGenIdea('');
+      onNotice({ tone: 'ok', text: t('social.posterGenerated', 'تم توليد البوستر — راجعه واعتمده من القائمة') });
+      await load();
+    } catch (error) {
+      onNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const create = async () => {
+    if (!form.headline.trim()) {
+      onNotice({ tone: 'warn', text: t('social.posterHeadlineRequired', 'اكتب العنوان الرئيسي، أو استخدم «ولّد البوستر» من فكرتك') });
+      return;
+    }
     setBusy('create');
     try {
       await api(`${base}/posters`, { method: 'POST', body: form });
@@ -1874,6 +1904,20 @@ function PostersTab({
         }
       >
         <div className="form-grid">
+          <Field label={t('social.posterGenerateLabel', 'ولّد بوستر تلقائيًا — اكتب فكرتك') }>
+            <Textarea
+              rows={3}
+              dir="auto"
+              placeholder={t('social.studio.ideaPlaceholder')}
+              value={genIdea}
+              onChange={(event) => setGenIdea(event.target.value)}
+            />
+          </Field>
+          <div className="row-actions">
+            <Button loading={busy === 'generate'} onClick={() => void generatePoster()}>
+              {t('social.posterGenerate', 'ولّد البوستر')}
+            </Button>
+          </div>
           <Field label={t('social.posterHeadline')}>
             <Input
               value={form.headline}
