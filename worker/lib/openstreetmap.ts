@@ -30,9 +30,13 @@ export const OSM_FALLBACK_ENDPOINT = 'https://overpass.kumi.systems/api/interpre
  * A configured `LEAD_DATA_API_URL` always wins over this list.
  */
 export const OSM_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
+  // Measured working order (June 2026): the French mirror and NextGIS answer
+  // bounded queries in ~2-5s while overpass-api.de is chronically at
+  // capacity. Starting with a busy mirror burned the whole 50s deadline on
+  // two 20s timeouts before a working mirror was ever tried.
   'https://overpass.openstreetmap.fr/api/interpreter',
   'https://overpass.nextgis.com/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
 ] as const;
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors — ODbL 1.0';
@@ -134,6 +138,62 @@ export function resolveSaudiCity(value: string): SaudiCity | null {
 
 const escapeOverpass = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
+/**
+ * Which OSM key each known sector tag lives under. Nearly every value in
+ * OSM_SECTOR_LABELS is `shop=<value>` or `amenity=<value>`; the exceptions
+ * (hotel=tourism, office values, leisure) are listed explicitly.
+ */
+export const OSM_SECTOR_KEYS: Record<string, string> = {
+  bakery: 'shop', supermarket: 'shop', convenience: 'shop', greengrocer: 'shop',
+  butcher: 'shop', pharmacy: 'shop', furniture: 'shop', electronics: 'shop',
+  mobile_phone: 'shop', clothes: 'shop', hardware: 'shop',
+  cafe: 'amenity', restaurant: 'amenity', fast_food: 'amenity', clinic: 'amenity',
+  dentist: 'amenity', doctors: 'amenity', hospital: 'amenity', veterinary: 'amenity',
+  school: 'amenity', university: 'amenity', car_repair: 'amenity', bank: 'amenity',
+  hotel: 'tourism', gym: 'leisure', fitness_centre: 'leisure',
+  estate_agent: 'office', lawyer: 'office', accountant: 'office', insurance: 'office',
+  travel_agency: 'office', beauty: 'shop', hairdresser: 'shop', laundry: 'shop',
+  optician: 'shop', photographer: 'office',
+};
+
+export type OsmSectorFilter = { key: string; value: string };
+
+/**
+ * Maps a tenant's ICP terms (Arabic or English, from sectors/services/
+ * keywords) onto concrete Overpass tag filters, so the query itself only
+ * returns businesses in the activity the tenant actually targets — instead
+ * of the nearest famous names in the city centre. Matching reuses the same
+ * hint table scoring uses, so query and score agree with each other.
+ * Terms that map to nothing (e.g. "تصميم مواقع") produce no filter and the
+ * caller falls back to the generic contact query.
+ */
+export function osmFiltersForTerms(terms: string[] | undefined): OsmSectorFilter[] {
+  const wanted = (terms ?? []).map((t) => String(t ?? '').trim().toLowerCase()).filter(Boolean);
+  if (!wanted.length) return [];
+  const filters: OsmSectorFilter[] = [];
+  const seen = new Set<string>();
+  for (const [tag, meta] of Object.entries(OSM_SECTOR_LABELS)) {
+    const key = OSM_SECTOR_KEYS[tag];
+    if (!key) continue;
+    const hints = [tag, meta.ar, ...meta.hints].map((h) => h.toLowerCase());
+    const hit = wanted.some((term) => hints.some((hint) => term.includes(hint) || hint.includes(term)));
+    if (!hit) continue;
+    const id = `${key}=${tag}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    filters.push({ key, value: tag });
+  }
+  return filters.slice(0, 12);
+}
+
+/**
+ * Contact keys used when a sector filter is present. The full list doubles
+ * the arm count (filters × keys) and public mirrors shed such queries;
+ * the four keys below cover the overwhelming majority of published records,
+ * and the per-element main-API rescue fills in the rest.
+ */
+export const OSM_SECTOR_CONTACT_KEYS = ['phone', 'contact:phone', 'website', 'email'];
+
 /** City centre (bbox midpoint) — OSM API neighbourhood queries anchor here. */
 export function cityCentre(city: SaudiCity): { lat: number; lng: number } {
   const [south, west, north, east] = city.bbox;
@@ -143,9 +203,15 @@ export function cityCentre(city: SaudiCity): { lat: number; lng: number } {
 /** A tighter, server-cheaper query: `nodes + ways`, not `nwr` (relations
  *  force a full member scan). `around` anchors close to the city centre so
  *  the server stops touching far tiles even while it is loaded. */
-export function buildAroundQuery(city: SaudiCity, limit: number, radiusMeters: number): string {
+export function buildAroundQuery(city: SaudiCity, limit: number, radiusMeters: number, sectorFilters?: OsmSectorFilter[]): string {
   const { lat, lng } = cityCentre(city);
-  const union = OSM_CONTACT_KEYS.map((key) => `nw["name"]["${key}"](around:${radiusMeters},${Number(lat.toFixed(4))},${Number(lng.toFixed(4))});`).join('\n');
+  const around = `around:${radiusMeters},${Number(lat.toFixed(4))},${Number(lng.toFixed(4))}`;
+  const arms = !sectorFilters?.length
+    ? OSM_CONTACT_KEYS.map((key) => `nw["name"]["${key}"](${around});`)
+    : sectorFilters.flatMap((f) =>
+        OSM_SECTOR_CONTACT_KEYS.map((key) => `nw["name"]["${f.key}"="${f.value}"]["${key}"](${around});`)
+      );
+  const union = arms.join('\n');
   return [
     '[out:json][timeout:20];',
     `// ${escapeOverpass(city.en)} (${escapeOverpass(city.ar)}) — Wusool open-data discovery`,
@@ -208,9 +274,20 @@ export const OSM_CONTACT_KEYS = [
  * exact-key match that uses the server index — a regex key scan over a whole
  * metro area is what gets killed on loaded public instances.
  */
-export function buildOverpassQuery(city: SaudiCity, limit: number): string {
+export function buildOverpassQuery(city: SaudiCity, limit: number, sectorFilters?: OsmSectorFilter[]): string {
   const box = coreBox(city);
-  const union = OSM_CONTACT_KEYS.map((key) => `  nwr["name"]["${key}"](${box});`).join('\n');
+  // Targeted mode (measured June 2026): sector × contact arms inside the
+  // city-core bbox answer in ~3s with every element carrying a contact
+  // detail. The same arms under `around:` timed out at 26s+ on public
+  // mirrors, and sector-only arms returned 200 elements of which only ~8%
+  // published any contact — discovery therefore uses the bbox shape
+  // whenever a sector filter is present.
+  const arms = !sectorFilters?.length
+    ? OSM_CONTACT_KEYS.map((key) => `  nwr["name"]["${key}"](${box});`)
+    : sectorFilters.flatMap((f) =>
+        OSM_SECTOR_CONTACT_KEYS.map((key) => `  nwr["name"]["${f.key}"="${f.value}"]["${key}"](${box});`)
+      );
+  const union = arms.join('\n');
   return [
     '[out:json][timeout:20];',
     `// ${escapeOverpass(city.en)} (${escapeOverpass(city.ar)}) — Wusool open-data discovery`,
@@ -382,6 +459,8 @@ export type OsmDiscoveryOptions = {
   endpoint?: string | null;
   city: SaudiCity;
   limit: number;
+  /** Target the tenant's activity: only these OSM sector tags are queried. */
+  sectorFilters?: OsmSectorFilter[];
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 };
@@ -423,9 +502,15 @@ export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promi
 
   // No configured endpoint: rotate the public mirrors, each with its own
   // radius tiers, so one at-capacity server cannot fail the whole run.
+  // Targeted (sector-filtered) queries use the bbox shape on every mirror:
+  // the `around:` shape was measured timing out for sector arms while the
+  // bbox shape answers in seconds.
+  const targeted = !!options.sectorFilters?.length;
   const tiers: Array<{ endpoint: string; radius?: number; box?: boolean }> = configuredEndpoints
     ? configuredEndpoints.map((endpoint) => ({ endpoint, box: true }))
-    : OSM_ENDPOINTS.flatMap((endpoint) => TIER_RADII.map((radius) => ({ endpoint, radius })));
+    : targeted
+      ? OSM_ENDPOINTS.map((endpoint) => ({ endpoint, box: true }))
+      : OSM_ENDPOINTS.flatMap((endpoint) => TIER_RADII.map((radius) => ({ endpoint, radius })));
   const deadline = Date.now() + 50_000;
 
   for (const tier of tiers) {
@@ -435,8 +520,8 @@ export async function discoverOpenDataLeads(options: OsmDiscoveryOptions): Promi
         await sleep(PAUSE_MS);
       }
       const query = tier.box
-        ? buildOverpassQuery(options.city, limit)
-        : buildAroundQuery(options.city, limit, tier.radius ?? 20_000);
+        ? buildOverpassQuery(options.city, limit, options.sectorFilters)
+        : buildAroundQuery(options.city, limit, tier.radius ?? 20_000, options.sectorFilters);
       try {
         const fetched = await requestOverpass(tier.endpoint, options, query);
         const enriched = await enrichWithMainApi(fetched.leads, options);
@@ -471,42 +556,46 @@ async function enrichWithMainApi(
   leads: OpenDataLead[],
   options: OsmDiscoveryOptions
 ): Promise<OpenDataLead[]> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  // Light per-element tag lookups run in small parallel batches (5 at a
+  // time): sequential adds ~1-3s per record, which made a 20-lead run take
+  // over a minute. Batches keep the public API's fair-use spirit.
   const enriched: OpenDataLead[] = [];
-  for (const lead of leads) {
-    const url = elementApiUrl(lead);
-    if (!url) {
-      enriched.push(lead);
-      continue;
-    }
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6_000);
-      try {
-        const response = await fetchImpl(url, {
-          headers: { accept: 'application/json', 'user-agent': OSM_USER_AGENT },
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          enriched.push(lead);
-          continue;
-        }
-        const payload: any = await response.json();
-        const element = payload?.elements?.[0];
-        if (element?.tags) {
-          const merged = mergeOsmTags({ type: element.type, id: element.id, tags: element.tags }, element.tags, options.city);
-          enriched.push(merged ?? lead);
-        } else {
-          enriched.push(lead);
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch {
-      enriched.push(lead);
-    }
+  for (let i = 0; i < leads.length; i += 5) {
+    const batch = await Promise.all(leads.slice(i, i + 5).map((lead) => enrichOneWithMainApi(lead, options)));
+    enriched.push(...batch);
   }
   return enriched;
+}
+
+async function enrichOneWithMainApi(
+  lead: OpenDataLead,
+  options: OsmDiscoveryOptions
+): Promise<OpenDataLead> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const url = elementApiUrl(lead);
+  if (!url) return lead;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6_000);
+    try {
+      const response = await fetchImpl(url, {
+        headers: { accept: 'application/json', 'user-agent': OSM_USER_AGENT },
+        signal: controller.signal,
+      });
+      if (!response.ok) return lead;
+      const payload: any = await response.json();
+      const element = payload?.elements?.[0];
+      if (element?.tags) {
+        const merged = mergeOsmTags({ type: element.type, id: element.id, tags: element.tags }, element.tags, options.city);
+        return merged ?? lead;
+      }
+      return lead;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return lead;
+  }
 }
 
 /**
@@ -641,6 +730,7 @@ async function requestOverpass(
   const leads: OpenDataLead[] = [];
   let skipped = 0;
   const seen = new Set<string>();
+  const seenNamePhone = new Set<string>();
 
   for (const element of elements) {
     const lead = mapOsmElement(element, options.city);
@@ -652,7 +742,16 @@ async function requestOverpass(
       skipped += 1;
       continue;
     }
+    // The same business is often listed twice in OSM under different element
+    // ids (e.g. a café chain with two pins). Dedupe on normalized name+phone
+    // so the tenant does not see the same prospect twice in one run.
+    const namePhone = `${normalizeCityName(lead.companyName)}|${(lead.phone ?? '').replace(/[^0-9]/g, '')}`;
+    if (lead.phone && seenNamePhone.has(namePhone)) {
+      skipped += 1;
+      continue;
+    }
     seen.add(lead.sourceUrl);
+    if (lead.phone) seenNamePhone.add(namePhone);
     leads.push(lead);
     if (leads.length >= limit) break;
   }

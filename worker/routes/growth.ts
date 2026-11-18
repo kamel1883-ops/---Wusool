@@ -30,6 +30,7 @@ import { can } from '../lib/rbac';
 import {
   LeadSourceError,
   discoverOpenDataLeads,
+  osmFiltersForTerms,
   resolveSaudiCity,
   type SaudiCity,
 } from '../lib/openstreetmap';
@@ -822,7 +823,13 @@ app.post('/:companyId/growth/discover', async (c) => {
         }
       }
 
-      const result = await discoverOpenDataLeads({ endpoint: source.endpoint, city: targetCity, limit });
+      // Target the tenant's own activity: the query only asks for businesses
+      // whose OSM sector matches the ICP (e.g. مطاعم → amenity=restaurant),
+      // not whatever famous names sit in the city centre. When the ICP terms
+      // map to no known OSM sector, the query falls back to any business
+      // publishing a contact detail.
+      const sectorFilters = osmFiltersForTerms([...icp.sectors, ...icp.services, ...icp.keywords]);
+      const result = await discoverOpenDataLeads({ endpoint: source.endpoint, city: targetCity, limit, sectorFilters });
       candidates = result.leads;
       discarded = result.skipped;
     } else {

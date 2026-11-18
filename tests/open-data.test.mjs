@@ -269,6 +269,20 @@ async function connectorChecks() {
   check('query does not ask for a key', !/authorization/i.test(query));
   check('query cap cannot exceed 50', osm.buildOverpassQuery(riyadh, 5000).includes('out center tags 50;'));
 
+  // Targeted discovery: the query itself must ask only for the tenant's
+  // activity, mapped from their ICP terms — not whatever is in the centre.
+  const foodFilters = osm.osmFiltersForTerms(['مطاعم', 'مقاهي']);
+  check(
+    'Arabic sector terms map to OSM tag filters',
+    foodFilters.length >= 2 && foodFilters.every((f) => f.key === 'amenity'),
+    foodFilters
+  );
+  const targetedQuery = osm.buildOverpassQuery(riyadh, 10, foodFilters);
+  check('targeted query filters by the mapped sector tag', targetedQuery.includes('["amenity"="restaurant"]'), targetedQuery);
+  check('targeted query still requires a published contact key', targetedQuery.includes('["phone"]'), targetedQuery);
+  check('unmapped ICP terms produce no filter (generic fallback)', osm.osmFiltersForTerms(['تصميم مواقع']).length === 0);
+  check('empty terms produce no filter', osm.osmFiltersForTerms([]).length === 0);
+
   const bakery = osm.mapOsmElement(ELEMENTS[0], riyadh);
   check('a business with a phone becomes a lead', bakery?.companyName === 'مخبز الرياض', bakery);
   check('website without a scheme gets https', bakery?.website === 'https://www.example-bakery.sa/', bakery?.website);
@@ -335,10 +349,11 @@ async function connectorChecks() {
   // --- Stable failure codes -------------------------------------------------
   const calls = [];
   let overpassAttempts = 0;
+  const primary = osm.OSM_ENDPOINTS[0];
   const stubFetch = async (url) => {
-    if (!String(url).includes('overpass-api.de')) return new Response('{\"elements\":[]}', { status: 200 });
+    if (!String(url).includes(primary)) return new Response('{\"elements\":[]}', { status: 200 });
     calls.push(String(url));
-    if (String(url).includes('overpass-api.de')) {
+    if (String(url).includes(primary)) {
       overpassAttempts += 1;
       if (overpassAttempts === 1) {
         return new Response('# 502 Gateway Timeout', { status: 502 });
@@ -379,9 +394,9 @@ async function connectorChecks() {
   const timeoutCalls = [];
   let timeoutAttempts = 0;
   const timeoutPrimaryFetch = async (url) => {
-    if (!String(url).includes('overpass-api.de')) return new Response('{\"elements\":[]}', { status: 200 });
+    if (!String(url).includes(primary)) return new Response('{\"elements\":[]}', { status: 200 });
     timeoutCalls.push(String(url));
-    if (String(url).includes('overpass-api.de')) {
+    if (String(url).includes(primary)) {
       timeoutAttempts += 1;
       if (timeoutAttempts === 1) {
         const error = new Error('overpass_timeout');
