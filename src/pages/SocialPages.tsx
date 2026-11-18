@@ -224,9 +224,21 @@ export function CompanySocialPage() {
     if (!oauth) return;
     if (oauth === 'select' && state) {
       api<{ platform: string; accounts: any[] }>(`${base}/oauth/pending?state=${encodeURIComponent(state)}`)
-        .then((data) =>
-          setPending({ state, platform: data.platform, accounts: data.accounts, chosen: data.accounts.map((a) => a.accountId) })
-        )
+        .then((data) => {
+          // Only publishable targets are preselected: Pages where the user
+          // holds CREATE_CONTENT, Instagram professional accounts, and every
+          // organization/account for other platforms. The personal login
+          // itself is never a publish target.
+          const publishable = data.accounts.filter(
+            (a) => a.accountType !== 'page_read_only' && a.accountType !== 'page_read-only'
+          );
+          setPending({
+            state,
+            platform: data.platform,
+            accounts: data.accounts,
+            chosen: publishable.map((a) => a.accountId),
+          });
+        })
         .catch((error) => setNotice({ tone: 'danger', text: t(errorKey((error as ApiError)?.code)) }));
     } else if (oauth === 'denied') {
       setNotice({ tone: 'warn', text: t('social.oauthDenied') });
@@ -544,7 +556,7 @@ export function CompanySocialPage() {
         onClose={() => setPending(null)}
         footer={
           <div className="row-actions">
-            <Button loading={busy === 'complete'} onClick={completeOauth}>
+            <Button loading={busy === 'complete'} disabled={!pending?.chosen.length} onClick={completeOauth}>
               {t('social.completeConnect')}
             </Button>
             <Button variant="ghost" onClick={() => setPending(null)}>
@@ -556,30 +568,46 @@ export function CompanySocialPage() {
         {pending ? (
           <div className="social-pending">
             <p className="muted small">{t('social.chooseAccountsHint')}</p>
-            {pending.accounts.map((account) => (
-              <label key={account.accountId} className="social-choice">
-                <input
-                  type="checkbox"
-                  checked={pending.chosen.includes(account.accountId)}
-                  onChange={(event) =>
-                    setPending({
-                      ...pending,
-                      chosen: event.target.checked
-                        ? [...pending.chosen, account.accountId]
-                        : pending.chosen.filter((id) => id !== account.accountId),
-                    })
-                  }
-                />
-                <span>
-                  <strong>{account.accountName}</strong>
-                  {account.pageId ? (
-                    <span className="muted small">
-                      {' '}· {t('social.pageLabel')}: <span dir="ltr">{account.pageId}</span>
-                    </span>
-                  ) : null}
-                </span>
-              </label>
-            ))}
+            <Alert tone="info">{t('social.postsToPageOnly')}</Alert>
+            {pending.accounts.length === 0 ? (
+              <p className="muted">{t('social.choosePagesEmpty')}</p>
+            ) : null}
+            {pending.accounts.map((account) => {
+              const readOnly = account.accountType === 'page_read_only' || account.accountType === 'page_read-only';
+              const isInstagram = account.accountType === 'instagram_professional';
+              return (
+                <label key={account.accountId} className="social-choice">
+                  <input
+                    type="checkbox"
+                    checked={pending.chosen.includes(account.accountId)}
+                    disabled={readOnly}
+                    onChange={(event) =>
+                      setPending({
+                        ...pending,
+                        chosen: event.target.checked
+                          ? [...pending.chosen, account.accountId]
+                          : pending.chosen.filter((id) => id !== account.accountId),
+                      })
+                    }
+                  />
+                  <span>
+                    <strong>{account.accountName}</strong>
+                    {isInstagram ? (
+                      <span className="badge badge-ok"> {t('social.pageCanPublish')} · Instagram</span>
+                    ) : readOnly ? (
+                      <span className="badge badge-muted"> {t('social.pageReadOnlyBadge')}</span>
+                    ) : (
+                      <span className="badge badge-ok"> {t('social.pageCanPublish')}</span>
+                    )}
+                    {account.pageId ? (
+                      <span className="muted small">
+                        {' '}· {t('social.pageLabel')} <span dir="ltr">{account.pageId}</span>
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         ) : null}
       </Modal>
@@ -717,6 +745,7 @@ function ConnectAccountsTab({
                     {live.map((connection) => (
                       <li key={connection.id}>
                         <strong>{connection.accountName}</strong>
+                        <span className="badge badge-ok">{t('social.postsToPageOnly')}</span>
                         {connection.profileUrl ? (
                           <a
                             className="btn btn-secondary btn-sm"
@@ -1376,6 +1405,7 @@ type StudioDraft = {
   posterPreviewUrl: string;
   imageUrl: string | null;
   imagePreviewUrl: string | null;
+  imageSource?: 'gemini' | 'ai' | 'poster';
   variant: number;
 };
 
@@ -1548,6 +1578,11 @@ function StudioTab({
               <>
                 <figure className="studio-image">
                   <img src={draft.imagePreviewUrl ?? draft.imageUrl ?? draft.posterPreviewUrl} alt={draft.headline} />
+                  {draft.imageSource === 'gemini' ? (
+                    <figcaption className="muted small">✨ {t('social.studio.aiImageGemini', 'صورة مولّدة بالذكاء الاصطناعي (Gemini) — نص ظاهر داخل الصورة')}</figcaption>
+                  ) : draft.imageSource === 'poster' ? (
+                    <figcaption className="muted small">{t('social.studio.posterFallback', 'بدون مفتاح صور ذكي — هذا تصميم نصي')}</figcaption>
+                  ) : null}
                 </figure>
                 <Field label={t('social.studio.caption')} htmlFor="studio-caption">
                   <Textarea

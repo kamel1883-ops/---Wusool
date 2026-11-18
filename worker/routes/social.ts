@@ -1056,19 +1056,33 @@ app.post('/:companyId/social/studio/generate', async (c) => {
     timestamp
   );
 
-  // Optional raster image; the poster above is the image when this is unset.
+  // Professional AI image (Gemini Nano Banana with rendered headline text).
+  // The SVG poster above remains the fallback when no image provider is set.
   let imageUrl: string | null = null;
   let imagePreviewUrl: string | null = null;
-  const generated = await generateStudioImage(c.env as any, draft.imagePrompt, size.width, size.height);
+  let imageSource: 'gemini' | 'ai' | 'poster' = 'poster';
+  const generated = await generateStudioImage(
+    c.env as any,
+    draft.imagePrompt,
+    size.width,
+    size.height,
+    draft.headline,
+    draft.subhead,
+    draft.cta,
+    language as 'ar' | 'en'
+  );
   if (generated?.kind === 'url') {
     imageUrl = generated.url;
+    imageSource = generated.source;
   } else if (generated?.kind === 'base64') {
     const imageId = newId('stimg');
     const bytes = Uint8Array.from(atob(generated.base64), (ch) => ch.charCodeAt(0));
-    await c.env.FILES.put(`studio/${imageId}.png`, bytes, {
+    const ext = generated.contentType.includes('jpeg') || generated.contentType.includes('jpg') ? 'jpg' : 'png';
+    await c.env.FILES.put(`studio/${imageId}.${ext}`, bytes, {
       httpMetadata: { contentType: generated.contentType },
     });
     imagePreviewUrl = `/${company.id}/social/studio/images/${imageId}`;
+    imageSource = generated.source;
   }
 
   await audit(c.env, {
@@ -1090,6 +1104,7 @@ app.post('/:companyId/social/studio/generate', async (c) => {
         posterPreviewUrl: `${origin}/api/company/${company.id}/posters/${posterId}/preview.svg`,
         imageUrl,
         imagePreviewUrl,
+        imageSource,
         variant,
       },
     },
@@ -1104,7 +1119,7 @@ app.get('/:companyId/social/studio/images/:imageId', async (c) => {
   }
   const imageId = String(c.req.param('imageId') ?? '').replace(/[^a-zA-Z0-9_]/g, '');
   if (!imageId.startsWith('stimg_')) return c.text('Not found', 404);
-  const object = await c.env.FILES.get(`studio/${imageId}.png`);
+  const object = (await c.env.FILES.get(`studio/${imageId}.png`)) ?? (await c.env.FILES.get(`studio/${imageId}.jpg`));
   if (!object) return c.text('Not found', 404);
   c.header('content-type', object.httpMetadata?.contentType ?? 'image/png');
   c.header('cache-control', 'private, max-age=300');

@@ -290,9 +290,82 @@ export async function buildAiDraft(
 }
 
 export type StudioImageResult =
-  | { kind: 'url'; url: string }
-  | { kind: 'base64'; base64: string; contentType: string }
+  | { kind: 'url'; url: string; source: 'gemini' | 'ai' }
+  | { kind: 'base64'; base64: string; contentType: string; source: 'gemini' | 'ai' }
   | null;
+
+/** Closest Gemini aspect ratio for the requested poster size. */
+const aspectRatioFor = (width: number, height: number): string => {
+  const ratio = width / Math.max(1, height);
+  if (ratio > 1.7) return '21:9';
+  if (ratio > 1.4) return '16:9';
+  if (ratio > 1.15) return '4:3';
+  if (ratio > 0.9) return '1:1';
+  if (ratio > 0.7) return '3:4';
+  return '9:16';
+};
+
+/**
+ * Professional marketing image generation via Google Gemini (Nano Banana).
+ *
+ * Uses a Gemini API key (`GEMINI_API_KEY`, free from Google AI Studio).
+ * The model renders the headline/subhead/CTA text directly in the image so
+ * the result is a finished social post visual, not a blank illustration.
+ * Returns null when no key is configured so the caller can fall back.
+ */
+export async function generateGeminiImage(
+  env: { GEMINI_API_KEY?: string; GOOGLE_AI_API_KEY?: string; GEMINI_IMAGE_MODEL?: string },
+  prompt: string,
+  headline: string,
+  subhead: string,
+  cta: string,
+  language: 'ar' | 'en',
+  width: number,
+  height: number
+): Promise<StudioImageResult> {
+  const apiKey = String(env.GEMINI_API_KEY ?? env.GOOGLE_AI_API_KEY ?? '').trim();
+  if (!apiKey) return null;
+  const model = String(env.GEMINI_IMAGE_MODEL ?? 'gemini-2.5-flash-image').trim() || 'gemini-2.5-flash-image';
+  const text = [
+    headline ? `Headline (render exactly, large bold, ${language === 'ar' ? 'Arabic' : 'English'}): ${headline}` : '',
+    subhead ? `Subheadline (smaller, below headline): ${subhead}` : '',
+    cta ? `CTA button text (small pill at bottom): ${cta}` : '',
+    `Scene: ${prompt}`,
+    'Style: professional Saudi B2B social media ad, clean modern design, high quality, natural lighting, brand-safe colors, no watermark, no logos, no mockups, crisp Arabic typography, balanced composition with image on one side and text panel on the other side',
+  ].filter(Boolean).join('\n');
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: { aspectRatio: aspectRatioFor(width, height) },
+          },
+        }),
+        signal: AbortSignal.timeout(120_000),
+      }
+    );
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  const payload: any = await response.json().catch(() => null);
+  const parts = payload?.candidates?.[0]?.content?.parts ?? [];
+  for (const part of parts) {
+    const data = part?.inlineData?.data;
+    const mime = part?.inlineData?.mimeType;
+    if (typeof data === 'string' && data) {
+      return { kind: 'base64', base64: data, contentType: String(mime ?? 'image/png'), source: 'gemini' };
+    }
+  }
+  return null;
+}
 
 /**
  * Optional raster image generation. Only runs when `AI_IMAGE_MODEL` is set —
@@ -300,11 +373,25 @@ export type StudioImageResult =
  * turn every generation into a confusing failure.
  */
 export async function generateStudioImage(
-  env: { AI_API_KEY?: string; AI_GATEWAY_URL?: string; AI_IMAGE_MODEL?: string },
+  env: {
+    AI_API_KEY?: string;
+    AI_GATEWAY_URL?: string;
+    AI_IMAGE_MODEL?: string;
+    GEMINI_API_KEY?: string;
+    GOOGLE_AI_API_KEY?: string;
+    GEMINI_IMAGE_MODEL?: string;
+  },
   prompt: string,
   width: number,
-  height: number
+  height: number,
+  headline = '',
+  subhead = '',
+  cta = '',
+  language: 'ar' | 'en' = 'ar'
 ): Promise<StudioImageResult> {
+  // Gemini first — professional Nano Banana images with rendered text.
+  const gemini = await generateGeminiImage(env, prompt, headline, subhead, cta, language, width, height);
+  if (gemini) return gemini;
   const apiKey = String(env.AI_API_KEY ?? '');
   const imageModel = String(env.AI_IMAGE_MODEL ?? '').trim();
   if (!apiKey || !imageModel) return null;
@@ -330,9 +417,9 @@ export async function generateStudioImage(
   if (!response.ok) return null;
   const payload: any = await response.json().catch(() => null);
   const image = payload?.data?.[0];
-  if (typeof image?.url === 'string' && image.url) return { kind: 'url', url: image.url.slice(0, 2000) };
+  if (typeof image?.url === 'string' && image.url) return { kind: 'url', url: image.url.slice(0, 2000), source: 'ai' };
   if (typeof image?.b64_json === 'string' && image.b64_json) {
-    return { kind: 'base64', base64: image.b64_json, contentType: 'image/png' };
+    return { kind: 'base64', base64: image.b64_json, contentType: 'image/png', source: 'ai' };
   }
   return null;
 }

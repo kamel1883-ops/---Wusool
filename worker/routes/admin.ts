@@ -1592,6 +1592,7 @@ app.get('/integrations', async (c) => {
       ]),
       ...secretStatus(['EMAIL_PROVIDER', 'EMAIL_API_KEY', 'EMAIL_FROM', 'JOBS_SECRET']),
       ...secretStatus(['LEAD_DATA_PROVIDER', 'LEAD_DATA_API_URL', 'LEAD_DATA_API_KEY']),
+      ...secretStatus(['GEMINI_API_KEY', 'GEMINI_IMAGE_MODEL']),
     ],
     oauthRedirectUri:
       str(env.SOCIAL_OAUTH_REDIRECT_URI, 500) || '(defaults to <origin>/api/social/oauth/callback)',
