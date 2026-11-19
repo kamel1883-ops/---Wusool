@@ -10,7 +10,7 @@
     "build": "vite build",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
     "test": "npm run schema && node tests/phase2.test.mjs && node tests/orders.test.mjs && node tests/providers.test.mjs && node tests/growth.test.mjs && node tests/open-data.test.mjs && node tests/social.test.mjs && node tests/tracking.test.mjs && node tests/posters.test.mjs && node tests/studio.test.mjs && node tests/visual.test.mjs",
-    "db:migrate": "npm run db:migrate:phase1 && npm run db:migrate:phase2 && npm run db:migrate:phase3 && npm run db:migrate:phase4 && npm run db:migrate:phase5 && npm run db:migrate:phase6 && npm run db:migrate:phase7 && npm run db:migrate:phase8 && npm run db:migrate:phase9 && npm run db:migrate:phase10",
+    "db:migrate": "npm run db:migrate:phase1 && npm run db:migrate:phase2 && npm run db:migrate:phase3 && npm run db:migrate:phase4 && npm run db:migrate:phase5 && npm run db:migrate:phase6 && npm run db:migrate:phase7 && npm run db:migrate:phase8 && npm run db:migrate:phase9 && npm run db:migrate:phase10 && npm run db:migrate:phase11",
     "db:migrate:phase5": "wrangler d1 execute wusool-db --local --file=migrations/0005_concurrency.sql",
     "db:migrate:phase4": "wrangler d1 execute wusool-db --local --file=migrations/0004_setup_codes.sql",
     "schema": "node scripts/build-schema.mjs",
@@ -22,7 +22,8 @@
     "db:migrate:phase7": "wrangler d1 execute wusool-db --local --file=migrations/0008_social_review.sql",
     "db:migrate:phase8": "wrangler d1 execute wusool-db --local --file=migrations/0009_tracking.sql",
     "db:migrate:phase9": "wrangler d1 execute wusool-db --local --file=migrations/0010_posters.sql",
-    "db:migrate:phase10": "wrangler d1 execute wusool-db --local --file=migrations/0011_lead_classification.sql"
+    "db:migrate:phase10": "wrangler d1 execute wusool-db --local --file=migrations/0011_lead_classification.sql",
+    "db:migrate:phase11": "wrangler d1 execute wusool-db --local --file=migrations/0012_lead_contact_cleanup.sql"
   },
   "dependencies": {
     "hono": "^4.6.14",
